@@ -21,7 +21,6 @@ export interface ReminderItem {
   list_name: string
   title: string
   notes: string
-  notification_template?: string
   priority: number
   due_at: string | null
   end_at: string | null
@@ -43,7 +42,6 @@ export interface ReminderItem {
 export interface SaveReminderInput {
   title: string
   notes?: string
-  notification_template?: string
   channel_targets?: Record<string, number[]>
   repeat_notify_minutes?: number
   list_id?: number

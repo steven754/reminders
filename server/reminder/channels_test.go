@@ -42,19 +42,14 @@ func TestNotificationContentOmitsScheduledTime(t *testing.T) {
 	if strings.Contains(got, "计划时间") {
 		t.Fatalf("notification content still includes scheduled time: %q", got)
 	}
-	if got != "你有一条新的提醒\n\nAD、维A、铁、钙" {
+	if got != "AD、维A、铁、钙" {
 		t.Fatalf("notification content = %q", got)
 	}
 }
 
-func TestNotificationContentUsesSelectedTemplate(t *testing.T) {
-	got := notificationContent(Reminder{
-		Title:                "服用维生素",
-		NotificationTemplate: "warm",
-		Notes:                "AD、维A、铁、钙",
-	})
-	if got != "温馨提醒：请记得完成「服用维生素」\n\nAD、维A、铁、钙" {
-		t.Fatalf("notification content = %q", got)
+func TestNotificationContentIsEmptyWithoutNotes(t *testing.T) {
+	if got := notificationContent(Reminder{Title: "服用维生素"}); got != "" {
+		t.Fatalf("notification content = %q, want empty", got)
 	}
 }
 

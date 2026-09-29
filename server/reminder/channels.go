@@ -360,8 +360,7 @@ func handleTestChannel(db *gorm.DB) gin.HandlerFunc {
 			}
 			item = Reminder{
 				ID: 0, UserID: userID, Title: reminderInput.Title, Notes: reminderInput.Notes,
-				NotificationTemplate: reminderInput.NotificationTemplate,
-				DueAt:                reminderInput.DueAt, EndAt: reminderInput.EndAt, AllDay: reminderInput.AllDay,
+				DueAt: reminderInput.DueAt, EndAt: reminderInput.EndAt, AllDay: reminderInput.AllDay,
 				RepeatRule: reminderInput.RepeatRule, CronExpr: reminderInput.CronExpr,
 				Calendar: reminderInput.Calendar, LunarAnchor: reminderInput.LunarAnchor,
 				RepeatNotifyMinutes: reminderInput.RepeatNotifyMinutes,
@@ -687,7 +686,7 @@ func stringValue(value []byte, err error) (string, error) {
 // became required: email uses all active targets, other channels use the first.
 func sendChannel(ctx context.Context, db *gorm.DB, channel string, userID uint, item Reminder, idempotencyKey string, targetIDs []uint) (sendResult, error) {
 	if channel == ChannelInApp {
-		n := Notification{UserID: userID, Type: "reminder_due", Title: item.Title, Body: notificationContent(item)}
+		n := Notification{UserID: userID, Type: "reminder_due", Title: item.Title, Body: notificationBody(item)}
 		if item.ID > 0 {
 			n.ReminderID = &item.ID
 		}
@@ -793,14 +792,7 @@ func sendChannelTarget(ctx context.Context, db *gorm.DB, channel, target string,
 }
 
 func notificationBody(item Reminder) string {
-	template, ok := notificationTemplates[item.NotificationTemplate]
-	if !ok || template == "" {
-		return "你有一条新的提醒"
-	}
-	return strings.TrimSpace(strings.NewReplacer(
-		"{{title}}", item.Title,
-		"{{notes}}", item.Notes,
-	).Replace(template))
+	return strings.TrimSpace(item.Notes)
 }
 
 func emailConfigured(db *gorm.DB) bool {
@@ -866,9 +858,7 @@ func sendEmail(db *gorm.DB, recipients []string, item Reminder) (sendResult, err
 	}
 	subject := "提醒：" + item.Title
 	body := notificationBody(item)
-	if item.Notes != "" {
-		body += "\r\n\r\n" + item.Notes
-	}
+	body = strings.ReplaceAll(body, "\n", "\r\n")
 	message := []byte("From: " + name + " <" + from + ">\r\n" +
 		"To: " + strings.Join(recipients, ", ") + "\r\n" +
 		"Subject: =?UTF-8?B?" + base64.StdEncoding.EncodeToString([]byte(subject)) + "?=\r\n" +
@@ -1136,11 +1126,7 @@ func sendBark(ctx context.Context, target string, item Reminder) (sendResult, er
 }
 
 func notificationContent(item Reminder) string {
-	content := notificationBody(item)
-	if item.Notes != "" {
-		content += "\n\n" + item.Notes
-	}
-	return content
+	return notificationBody(item)
 }
 
 func sendFeishu(ctx context.Context, db *gorm.DB, openID string, item Reminder, idempotencyKey string) (sendResult, error) {
@@ -1314,9 +1300,9 @@ func notificationBrand(db *gorm.DB) string {
 }
 
 func robotNotificationText(db *gorm.DB, item Reminder) string {
-	text := "【" + notificationBrand(db) + "】\n⏰ " + item.Title + "\n" + notificationBody(item)
-	if item.Notes != "" {
-		text += "\n" + item.Notes
+	text := "【" + notificationBrand(db) + "】\n⏰ " + item.Title
+	if body := notificationContent(item); body != "" {
+		text += "\n" + body
 	}
 	return text
 }
@@ -1325,9 +1311,9 @@ func robotNotificationText(db *gorm.DB, item Reminder) string {
 // deliberately includes “提醒”, allowing a user to set that exact keyword
 // without managing a signing secret.
 func dingTalkNotificationText(db *gorm.DB, item Reminder) string {
-	text := "【" + notificationBrand(db) + "】\n⏰ 提醒：" + item.Title + "\n" + notificationBody(item)
-	if item.Notes != "" {
-		text += "\n" + item.Notes
+	text := "【" + notificationBrand(db) + "】\n⏰ 提醒：" + item.Title
+	if body := notificationContent(item); body != "" {
+		text += "\n" + body
 	}
 	return text
 }
