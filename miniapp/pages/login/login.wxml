@@ -1,0 +1,14 @@
+<view class="page login-page">
+  <view class="brand-mark">✓</view>
+  <view class="title">统一提醒中心</view>
+  <view class="subtitle">把要记得的事，安排得井井有条</view>
+
+  <view class="login-card card">
+    <view class="field-title">应用账号</view>
+    <input class="input" value="{{username}}" placeholder="请输入用户名" bindinput="onUsernameInput" />
+    <view class="field-title password-title">密码</view>
+    <input class="input" value="{{password}}" password placeholder="请输入密码" bindinput="onPasswordInput" />
+    <button class="primary login-button" loading="{{loading}}" disabled="{{loading}}" bindtap="submit">登录</button>
+  </view>
+  <view class="hint">请先在提醒中心网页完成账号注册</view>
+</view>

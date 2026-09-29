@@ -1,0 +1,17 @@
+{
+  "description": "reminders 微信小程序",
+  "compileType": "miniprogram",
+  "miniprogramRoot": "./",
+  "libVersion": "3.8.0",
+  "setting": {
+    "urlCheck": false,
+    "es6": true,
+    "enhance": true,
+    "postcss": true,
+    "minified": true,
+    "coverView": true,
+    "checkInvalidKey": false
+  },
+  "simulatorType": "wechat",
+  "condition": {}
+}

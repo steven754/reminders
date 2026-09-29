@@ -1,0 +1,101 @@
+<view class="page">
+  <view class="header">
+    <view class="title">{{id ? '编辑提醒' : '新增提醒'}}</view>
+    <view class="muted">开始时间用于第一次提醒；循环提醒可设置结束时间</view>
+  </view>
+
+  <view class="form card">
+    <view class="label">标题</view>
+    <input class="input" value="{{title}}" maxlength="200" placeholder="要提醒什么？" bindinput="onTitleInput" />
+
+    <view class="label">备注</view>
+    <textarea class="textarea" value="{{notes}}" maxlength="5000" placeholder="可选" bindinput="onNotesInput"></textarea>
+
+    <view class="label">开始时间</view>
+    <view class="row">
+      <picker class="picker" mode="date" value="{{startDate}}" bindchange="onStartDateChange"><view>{{startDate || '选择日期'}}</view></picker>
+      <picker class="picker" mode="time" value="{{startTime}}" bindchange="onStartTimeChange"><view>{{startTime || '选择时间'}}</view></picker>
+    </view>
+
+    <view class="label">重复频率</view>
+    <picker class="picker full" mode="selector" range="{{repeatOptions}}" range-key="label" value="{{repeatIndex}}" bindchange="onRepeatChange"><view>{{repeatLabel}}</view></picker>
+
+    <block wx:if="{{repeatRule !== 'none' && repeatRule !== 'cron'}}">
+      <view class="label">时间规则</view>
+      <picker class="picker full" mode="selector" range="{{timeModeOptions}}" range-key="label" value="{{timeModeIndex}}" bindchange="onTimeModeChange"><view>{{timeModeLabel}}</view></picker>
+
+      <block wx:if="{{timeMode === 'point'}}">
+        <view class="label">提醒时间</view>
+        <picker class="picker full" mode="time" value="{{startTime}}" bindchange="onStartTimeChange"><view>{{startTime || '选择时间'}}</view></picker>
+      </block>
+      <block wx:else>
+        <view class="label">时间段</view>
+        <view class="row">
+          <picker class="picker" mode="time" value="{{startTime}}" bindchange="onStartTimeChange"><view>{{startTime || '开始时间'}}</view></picker>
+          <picker class="picker" mode="time" value="{{rangeEndTime}}" bindchange="onRangeEndTimeChange"><view>{{rangeEndTime || '结束时间'}}</view></picker>
+        </view>
+        <view class="row">
+          <picker class="picker" mode="selector" range="{{intervalUnitOptions}}" range-key="label" value="{{intervalUnitIndex}}" bindchange="onIntervalUnitChange"><view>{{intervalUnitLabel}}</view></picker>
+          <picker class="picker" mode="selector" range="{{intervalValueOptions}}" value="{{intervalValueIndex}}" bindchange="onIntervalValueChange"><view>{{intervalValue}} {{intervalUnitLabel}}</view></picker>
+        </view>
+        <view class="tip">间隔必须小于所选时间段；不满足时不会生成下一次提醒。</view>
+      </block>
+
+      <block wx:if="{{repeatRule === 'weekly'}}">
+        <view class="label">星期（可多选）</view>
+        <checkbox-group class="rule-options" bindchange="onWeekdayChange">
+          <label wx:for="{{weekdays}}" wx:key="value" class="rule-option"><checkbox value="{{item.value}}" checked="{{selectedWeekdays.indexOf(item.value) >= 0}}" color="#3182f6" /><text>{{item.label}}</text></label>
+        </checkbox-group>
+      </block>
+
+      <block wx:if="{{repeatRule === 'monthly' || repeatRule === 'yearly'}}">
+        <block wx:if="{{repeatRule === 'yearly'}}">
+          <view class="label">月份（可多选）</view>
+          <checkbox-group class="rule-options" bindchange="onMonthChange">
+            <label wx:for="{{months}}" wx:key="value" class="rule-option"><checkbox value="{{item.value}}" checked="{{selectedMonths.indexOf(item.value) >= 0}}" color="#3182f6" /><text>{{item.label}}</text></label>
+          </checkbox-group>
+        </block>
+        <view class="label">日期方式</view>
+        <picker class="picker full" mode="selector" range="{{calendarModeOptions}}" value="{{calendarModeIndex}}" bindchange="onCalendarModeChange"><view>{{calendarModeLabel}}</view></picker>
+        <block wx:if="{{calendarMode === 'date'}}">
+          <picker class="picker full" mode="selector" range="{{monthDays}}" value="{{monthDayIndex}}" bindchange="onMonthDayChange"><view>每月 {{monthDay}} 号</view></picker>
+        </block>
+        <block wx:else>
+          <checkbox-group class="rule-options" bindchange="onWeekdayChange">
+            <label wx:for="{{weekdays}}" wx:key="value" class="rule-option"><checkbox value="{{item.value}}" checked="{{selectedWeekdays.indexOf(item.value) >= 0}}" color="#3182f6" /><text>{{item.label}}</text></label>
+          </checkbox-group>
+          <view class="tip">需要“第几个星期几”时请使用自定义 Cron。</view>
+        </block>
+      </block>
+      <view class="tip">{{generatedCron ? '已生成：' + generatedCron : '请完善循环规则'}}</view>
+    </block>
+
+    <block wx:if="{{repeatRule === 'cron'}}">
+      <view class="label">Cron 表达式</view>
+      <input class="input mono" value="{{cronExpr}}" maxlength="120" placeholder="30 8-20/2 * * *" bindinput="onCronInput" />
+      <view class="tip">格式：分 时 日 月 周。例：30 8-20/2 * * * = 每天 08:30 起每 2 小时提醒一次。</view>
+    </block>
+
+    <block wx:if="{{repeatRule !== 'none'}}">
+      <view class="label">结束时间</view>
+      <view class="row">
+        <picker class="picker" mode="date" value="{{endDate}}" start="{{startDate}}" bindchange="onEndDateChange"><view>{{endDate || '选择日期'}}</view></picker>
+        <picker class="picker" mode="time" value="{{endTime}}" bindchange="onEndTimeChange"><view>{{endTime || '选择时间'}}</view></picker>
+      </view>
+      <view class="tip">不填写结束时间表示持续循环；开始时间是第一次提醒时间。</view>
+    </block>
+
+    <view wx:if="{{lists.length}}" class="label">清单</view>
+    <picker wx:if="{{lists.length}}" class="picker full" mode="selector" range="{{lists}}" range-key="name" value="{{listIndex}}" bindchange="onListChange"><view>{{lists[listIndex].name}}</view></picker>
+
+    <view class="label">通知方式</view>
+    <checkbox-group class="channels" bindchange="onChannelChange">
+      <label wx:for="{{channels}}" wx:key="channel" class="channel">
+        <checkbox value="{{item.channel}}" checked="{{selectedChannels.indexOf(item.channel) >= 0}}" color="#3182f6" />
+        <text>{{item.label}}</text>
+      </label>
+    </checkbox-group>
+  </view>
+
+  <button class="primary save" loading="{{saving}}" disabled="{{saving}}" bindtap="save">保存提醒</button>
+</view>

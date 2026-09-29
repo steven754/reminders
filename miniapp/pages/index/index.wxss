@@ -1,0 +1,127 @@
+.topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin: 12rpx 0 34rpx;
+}
+
+.eyebrow {
+  color: #3182f6;
+  font-size: 20rpx;
+  font-weight: 800;
+  letter-spacing: 4rpx;
+}
+
+.title {
+  margin-top: 8rpx;
+  font-size: 48rpx;
+  font-weight: 800;
+}
+
+.logout {
+  margin: 0;
+  padding: 0 20rpx;
+  color: #78869a;
+  background: transparent;
+  font-size: 24rpx;
+}
+
+.tabs {
+  display: flex;
+  padding: 8rpx;
+}
+
+.tab {
+  flex: 1;
+  height: 72rpx;
+  padding: 0;
+  color: #8a95a6;
+  background: transparent;
+  font-size: 25rpx;
+  line-height: 72rpx;
+}
+
+.tab.active {
+  color: #3182f6;
+  background: #eaf2ff;
+  font-weight: 700;
+}
+
+.loading,
+.empty {
+  margin-top: 28rpx;
+  padding: 60rpx 28rpx;
+  color: #8b97a8;
+  text-align: center;
+  font-size: 26rpx;
+}
+
+.list {
+  margin-top: 24rpx;
+}
+
+.item {
+  display: flex;
+  align-items: flex-start;
+  margin-bottom: 18rpx;
+  padding: 26rpx 22rpx;
+}
+
+.check {
+  flex: 0 0 auto;
+  width: 42rpx;
+  height: 42rpx;
+  margin: 4rpx 20rpx 0 0;
+  padding: 0;
+  color: #fff;
+  background: transparent;
+  border: 3rpx solid #cbd5e1;
+  font-size: 26rpx;
+  line-height: 36rpx;
+}
+
+.check.checked {
+  background: #3182f6;
+  border-color: #3182f6;
+}
+
+.item-main {
+  min-width: 0;
+  flex: 1;
+}
+
+.item-title {
+  overflow: hidden;
+  color: #172033;
+  font-size: 29rpx;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.item-title.done {
+  color: #9aa5b5;
+  text-decoration: line-through;
+}
+
+.item-notes,
+.item-meta {
+  margin-top: 8rpx;
+  overflow: hidden;
+  color: #8b97a8;
+  font-size: 22rpx;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.delete {
+  margin: 0 0 0 12rpx;
+  padding: 0 8rpx;
+  color: #e05d6f;
+  background: transparent;
+  font-size: 21rpx;
+}
+
+.add-button {
+  margin-top: 30rpx;
+}

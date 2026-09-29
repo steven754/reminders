@@ -1,0 +1,21 @@
+{
+  "appname": "reminders",
+  "display_name": "统一提醒中心",
+  "version": "0.1.0",
+  "desc": "Go + Vue + MySQL 的统一多渠道提醒中心",
+  "author": "steven",
+  "website": "",
+  "port": 8906,
+  "docker": {
+    "image": "stevensign/reminders",
+    "container": "reminders",
+    "tag_prefix": "reminders"
+  },
+  "fnos": {
+    "os_min_version": "1.0.0",
+    "service_port": 8906,
+    "ctl_stop": true,
+    "checkport": false,
+    "disable_authorization_path": false
+  }
+}

@@ -1,0 +1,109 @@
+.header {
+  margin: 12rpx 0 26rpx;
+}
+
+.title {
+  font-size: 44rpx;
+  font-weight: 800;
+}
+
+.header .muted {
+  margin-top: 12rpx;
+  font-size: 23rpx;
+}
+
+.form {
+  padding: 30rpx;
+}
+
+.label {
+  margin-top: 28rpx;
+  color: #59677c;
+  font-size: 24rpx;
+  font-weight: 700;
+}
+
+.label:first-child {
+  margin-top: 0;
+}
+
+.input,
+.textarea,
+.picker {
+  box-sizing: border-box;
+  margin-top: 12rpx;
+  padding: 0 24rpx;
+  color: #172033;
+  background: #f4f7fb;
+  border: 1rpx solid #e5ebf3;
+  border-radius: 18rpx;
+  font-size: 27rpx;
+}
+
+.input,
+.picker {
+  height: 84rpx;
+  line-height: 84rpx;
+}
+
+.mono {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+.textarea {
+  width: 100%;
+  min-height: 150rpx;
+  padding-top: 22rpx;
+  line-height: 1.6;
+}
+
+.row {
+  display: flex;
+  gap: 18rpx;
+}
+
+.row .picker {
+  flex: 1;
+}
+
+.picker.full {
+  width: 100%;
+}
+
+.tip {
+  margin-top: 12rpx;
+  color: #8b97a8;
+  font-size: 21rpx;
+}
+
+.channels {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 18rpx 28rpx;
+  margin-top: 14rpx;
+}
+
+.rule-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 18rpx 26rpx;
+  margin-top: 14rpx;
+}
+
+.rule-option {
+  display: flex;
+  align-items: center;
+  color: #526176;
+  font-size: 24rpx;
+}
+
+.channel {
+  display: flex;
+  align-items: center;
+  color: #526176;
+  font-size: 24rpx;
+}
+
+.save {
+  margin-top: 30rpx;
+}

@@ -1,0 +1,31 @@
+<view class="page">
+  <view class="topbar">
+    <view>
+      <view class="eyebrow">REMINDERS</view>
+      <view class="title">我的提醒</view>
+    </view>
+    <button class="logout" bindtap="logout">退出</button>
+  </view>
+
+  <view class="tabs card">
+    <button class="tab {{view === 'today' ? 'active' : ''}}" data-view="today" bindtap="switchView">今天</button>
+    <button class="tab {{view === 'planned' ? 'active' : ''}}" data-view="planned" bindtap="switchView">计划</button>
+    <button class="tab {{view === 'completed' ? 'active' : ''}}" data-view="completed" bindtap="switchView">已完成</button>
+  </view>
+
+  <view wx:if="{{loading}}" class="loading">读取中…</view>
+  <view wx:elif="{{items.length}}" class="list">
+    <view wx:for="{{items}}" wx:key="id" class="item card" data-id="{{item.id}}" bindtap="editReminder">
+      <button class="check {{item.completed_at ? 'checked' : ''}}" data-item="{{item}}" catchtap="toggleComplete">{{item.completed_at ? '✓' : ''}}</button>
+      <view class="item-main">
+        <view class="item-title {{item.completed_at ? 'done' : ''}}">{{item.title}}</view>
+        <view wx:if="{{item.notes}}" class="item-notes">{{item.notes}}</view>
+        <view class="item-meta">{{item.displayTime}}<text wx:if="{{item.end_at}}"> · 至 {{item.end_at}}</text><text wx:if="{{item.repeat_rule !== 'none'}}"> · {{item.repeat_rule === 'daily' ? '每天' : item.repeat_rule === 'weekly' ? '每周' : item.repeat_rule === 'monthly' ? '每月' : item.repeat_rule === 'cron' ? '自定义 Cron' : '每年'}}</text></view>
+      </view>
+      <button class="delete" data-id="{{item.id}}" catchtap="deleteReminder">删除</button>
+    </view>
+  </view>
+  <view wx:else class="empty card">{{emptyText}}</view>
+
+  <button class="primary add-button" bindtap="addReminder">＋ 新增提醒</button>
+</view>

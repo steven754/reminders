@@ -1,0 +1,15 @@
+{
+  "pages": [
+    "pages/login/login",
+    "pages/index/index",
+    "pages/edit/edit"
+  ],
+  "window": {
+    "navigationBarTitleText": "统一提醒中心",
+    "navigationBarBackgroundColor": "#f7f9fc",
+    "navigationBarTextStyle": "black",
+    "backgroundColor": "#f7f9fc"
+  },
+  "style": "v2",
+  "sitemapLocation": "sitemap.json"
+}

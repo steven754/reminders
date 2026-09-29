@@ -1,0 +1,99 @@
+package reminder
+
+import (
+	"time"
+
+	"smallgo/server/apps"
+	"smallgo/server/database"
+	"smallgo/server/scheduler"
+	"smallgo/server/sysconfig"
+
+	"gorm.io/gorm"
+)
+
+var appDB *gorm.DB
+
+func init() {
+	database.Upgrades = append(database.Upgrades, database.Upgrade{
+		Version: "0.1.2", Name: "rename_default_site_title",
+		Upgrade: func(db *gorm.DB) error {
+			// Preserve administrator customisations; only migrate the old default.
+			return db.Model(&database.SystemConfig{}).
+				Where("user_id = ? AND `key` = ? AND value = ?", 0, "site_title", "Reminder").
+				Update("value", "统一提醒中心").Error
+		},
+	})
+
+	database.Upgrades = append(database.Upgrades, database.Upgrade{
+		Version: "0.3.0", Name: "allow_multiple_email_bindings",
+		// The old unique index on (user_id, channel) capped every channel at
+		// one binding; email now keeps one row per receiving address. The
+		// replacement composite index is created by AutoMigrate, so only the
+		// legacy unique index needs dropping here.
+		Upgrade: func(db *gorm.DB) error {
+			if db.Migrator().HasIndex(&ChannelBinding{}, "idx_user_channel_binding") {
+				return db.Migrator().DropIndex(&ChannelBinding{}, "idx_user_channel_binding")
+			}
+			return nil
+		},
+	})
+
+	database.Upgrades = append(database.Upgrades, database.Upgrade{
+		Version: "0.3.2", Name: "normalize_lunar_calendar_column",
+		// The old "yearly_lunar" rule spelling becomes rule=yearly plus
+		// calendar=lunar, matching the new picker model where the calendar
+		// is a separate choice from the repeat interval.
+		Upgrade: func(db *gorm.DB) error {
+			return db.Exec(`UPDATE reminders SET calendar = 'lunar', repeat_rule = 'yearly' WHERE repeat_rule = 'yearly_lunar'`).Error
+		},
+	})
+
+	database.RegisterModels(
+		&List{}, &Reminder{}, &ReminderChannel{}, &Completion{},
+		&ChannelBinding{}, &ProviderConfig{}, &QQBindCode{}, &DeliveryJob{}, &DeliveryAttempt{}, &Notification{},
+	)
+
+	sysconfig.RegisterConfig(sysconfig.ConfigDef{
+		Key: "reminder_default_channels", Scope: sysconfig.ScopeUser, Type: sysconfig.TypeString,
+		Default: "inapp", Group: "notification", Label: "默认提醒渠道",
+		Description: "新提醒默认使用的渠道，多个渠道以英文逗号分隔",
+	})
+	sysconfig.RegisterConfig(sysconfig.ConfigDef{
+		Key: "reminder_all_day_time", Scope: sysconfig.ScopeUser, Type: sysconfig.TypeString,
+		Default: "09:00", Group: "notification", Label: "全天提醒时间",
+		Description: "只有日期的提醒在当天何时通知",
+	})
+
+	apps.Register(apps.App{
+		Name:        "reminder",
+		DisplayName: "统一提醒中心",
+		Icon:        "check-circle",
+		RoutePrefix: "/reminders",
+		NavPosition: 10,
+		SetupAuth:   setupAuthRoutes,
+		SetupAdmin:  setupAdminRoutes,
+		Migrate: func(db *gorm.DB) error {
+			appDB = db
+			return nil
+		},
+	})
+
+	scheduler.Register(scheduler.Job{
+		Name:       "reminder-delivery",
+		Interval:   time.Minute,
+		RunAtStart: true,
+		Run: func() {
+			if appDB != nil {
+				dispatchDueJobs(appDB)
+			}
+		},
+	})
+	scheduler.Register(scheduler.Job{
+		Name: "reminder-qq-gateway", Interval: 30 * time.Second,
+		Run: func() {
+			if appDB != nil {
+				ensureQQGateway(appDB)
+			}
+		},
+	})
+}

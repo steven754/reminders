@@ -1,0 +1,21 @@
+name: reminders
+
+services:
+  reminders:
+    image: stevensign/reminders:latest
+    container_name: reminders
+    restart: unless-stopped
+    ports:
+      - "8906:8906"
+    environment:
+      # 外部 MySQL：应用首次启动会自动初始化 reminders 库中的表。
+      - MYSQL_HOST=192.168.31.6
+      - MYSQL_PORT=3306
+      - MYSQL_USER=reminders
+      - MYSQL_PASSWORD=reminders
+      - MYSQL_DB_NAME=reminders
+      - TZ=Asia/Shanghai
+      - DATA_DIR=/app/data
+      - DISABLE_STATS=1
+    volumes:
+      - ./data:/app/data

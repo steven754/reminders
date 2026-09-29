@@ -1,0 +1,64 @@
+.login-page {
+  padding-top: 150rpx;
+  text-align: center;
+}
+
+.brand-mark {
+  width: 112rpx;
+  height: 112rpx;
+  margin: 0 auto 30rpx;
+  color: #fff;
+  background: linear-gradient(135deg, #3182f6, #6c63ff);
+  border-radius: 34rpx;
+  font-size: 70rpx;
+  line-height: 112rpx;
+  box-shadow: 0 20rpx 42rpx rgba(49, 130, 246, .25);
+}
+
+.title {
+  font-size: 48rpx;
+  font-weight: 800;
+}
+
+.subtitle {
+  margin-top: 16rpx;
+  color: #8893a5;
+  font-size: 26rpx;
+}
+
+.login-card {
+  margin-top: 72rpx;
+  padding: 38rpx;
+  text-align: left;
+}
+
+.field-title {
+  color: #59677c;
+  font-size: 24rpx;
+  font-weight: 700;
+}
+
+.password-title {
+  margin-top: 30rpx;
+}
+
+.input {
+  height: 88rpx;
+  margin-top: 12rpx;
+  padding: 0 26rpx;
+  box-sizing: border-box;
+  background: #f4f7fb;
+  border: 1rpx solid #e5ebf3;
+  border-radius: 18rpx;
+  font-size: 28rpx;
+}
+
+.login-button {
+  margin-top: 42rpx;
+}
+
+.hint {
+  margin-top: 28rpx;
+  color: #9aa5b5;
+  font-size: 22rpx;
+}
