@@ -40,8 +40,8 @@ type SaveReminderInput struct {
 	// RepeatNotifyMinutes re-notifies an uncompleted reminder on this interval
 	// (in minutes) after each due time; 0 disables it.
 	RepeatNotifyMinutes int `json:"repeat_notify_minutes"`
-	// ChannelTargets optionally maps a multi-target channel (email) to the
-	// ChannelBinding IDs this reminder delivers to. Absent or empty means all.
+	// ChannelTargets maps each external channel to the ChannelBinding IDs this
+	// reminder delivers to. In-app notifications do not need a target.
 	ChannelTargets map[string][]uint `json:"channel_targets"`
 	// LunarAnchor optionally pins the lunar month/day a lunar reminder
 	// recurs on, encoded "M:D" (negative M = leap month). When empty, the
@@ -165,20 +165,17 @@ func validateReminderInput(in *SaveReminderInput) error {
 	}
 	sort.Strings(clean)
 	in.Channels = clean
-	// Per-reminder mailbox selection only applies when the email channel is
-	// selected; every other key is ignored.
-	if in.ChannelTargets != nil {
-		cleaned := map[string][]uint{}
-		for _, ch := range in.Channels {
-			if ch != ChannelEmail {
-				continue
-			}
-			if ids := dedupeUint(in.ChannelTargets[ch]); len(ids) > 0 {
-				cleaned[ch] = ids
-			}
+	// Keep only targets for selected channels. The transaction below checks
+	// ownership and requires at least one active target for every external
+	// channel, so a forged ID cannot be saved or sent to another user.
+	cleaned := map[string][]uint{}
+	for _, ch := range in.Channels {
+		if ch == ChannelInApp {
+			continue
 		}
-		in.ChannelTargets = cleaned
+		cleaned[ch] = dedupeUint(in.ChannelTargets[ch])
 	}
+	in.ChannelTargets = cleaned
 	return nil
 }
 
@@ -299,18 +296,23 @@ func replaceChannels(tx *gorm.DB, reminder Reminder, in SaveReminderInput) error
 	rows := make([]ReminderChannel, 0, len(in.Channels))
 	for _, ch := range in.Channels {
 		row := ReminderChannel{ReminderID: reminder.ID, UserID: reminder.UserID, Channel: ch, Enabled: true}
-		if ch == ChannelEmail && len(in.ChannelTargets[ch]) > 0 {
-			ids, err := ownedEmailBindingIDs(tx, reminder.UserID, in.ChannelTargets[ch])
+		if ch != ChannelInApp {
+			wanted := dedupeUint(in.ChannelTargets[ch])
+			if len(wanted) == 0 {
+				return fmt.Errorf("%s提醒至少选择一个接收人", channelLabel(ch))
+			}
+			ids, err := ownedActiveBindingIDs(tx, reminder.UserID, ch, wanted)
 			if err != nil {
 				return err
 			}
-			if len(ids) > 0 {
-				raw, err := json.Marshal(ids)
-				if err != nil {
-					return err
-				}
-				row.Targets = string(raw)
+			if len(ids) != len(wanted) {
+				return fmt.Errorf("%s提醒选择的接收人不存在或已停用", channelLabel(ch))
 			}
+			raw, err := json.Marshal(ids)
+			if err != nil {
+				return err
+			}
+			row.Targets = string(raw)
 		}
 		rows = append(rows, row)
 	}
@@ -320,12 +322,13 @@ func replaceChannels(tx *gorm.DB, reminder Reminder, in SaveReminderInput) error
 	return tx.Create(&rows).Error
 }
 
-// ownedEmailBindingIDs keeps only the IDs that belong to the user's own email
-// bindings, so a crafted request cannot reference another account's targets.
-func ownedEmailBindingIDs(tx *gorm.DB, userID uint, wanted []uint) ([]uint, error) {
+// ownedActiveBindingIDs returns only active targets belonging to the current
+// user. The caller compares the count with wanted so missing, foreign, or
+// disabled recipients are rejected instead of silently redirected.
+func ownedActiveBindingIDs(tx *gorm.DB, userID uint, channel string, wanted []uint) ([]uint, error) {
 	var ids []uint
 	if err := tx.Model(&ChannelBinding{}).
-		Where("user_id = ? AND channel = ? AND id IN ?", userID, ChannelEmail, wanted).
+		Where("user_id = ? AND channel = ? AND status = ? AND id IN ?", userID, channel, "active", wanted).
 		Order("id ASC").Pluck("id", &ids).Error; err != nil {
 		return nil, err
 	}
@@ -388,10 +391,11 @@ func getReminder(db *gorm.DB, userID, reminderID uint) (ReminderDTO, error) {
 	dto := ReminderDTO{Reminder: item, ListName: list.Name}
 	for _, ch := range channels {
 		dto.Channels = append(dto.Channels, ch.Channel)
-		if ch.Channel == ChannelEmail {
-			if ids := parseChannelTargets(ch.Targets); len(ids) > 0 {
-				dto.ChannelTargets = map[string][]uint{ChannelEmail: ids}
+		if ids := parseChannelTargets(ch.Targets); len(ids) > 0 {
+			if dto.ChannelTargets == nil {
+				dto.ChannelTargets = map[string][]uint{}
 			}
+			dto.ChannelTargets[ch.Channel] = ids
 		}
 	}
 	return dto, nil
@@ -461,10 +465,11 @@ func listReminders(db *gorm.DB, userID uint, view, query string, listID uint) ([
 	targetsByReminder := map[uint]map[string][]uint{}
 	for _, channel := range channelRows {
 		channelsByReminder[channel.ReminderID] = append(channelsByReminder[channel.ReminderID], channel.Channel)
-		if channel.Channel == ChannelEmail {
-			if ids := parseChannelTargets(channel.Targets); len(ids) > 0 {
-				targetsByReminder[channel.ReminderID] = map[string][]uint{ChannelEmail: ids}
+		if ids := parseChannelTargets(channel.Targets); len(ids) > 0 {
+			if targetsByReminder[channel.ReminderID] == nil {
+				targetsByReminder[channel.ReminderID] = map[string][]uint{}
 			}
+			targetsByReminder[channel.ReminderID][channel.Channel] = ids
 		}
 	}
 
@@ -684,10 +689,10 @@ func nextCronOccurrence(t time.Time, expr string) (time.Time, error) {
 }
 
 type intervalSchedule struct {
-	step       time.Duration
-	start      int
-	end        int
-	base       cron.Schedule
+	step  time.Duration
+	start int
+	end   int
+	base  cron.Schedule
 }
 
 func (s intervalSchedule) Next(t time.Time) time.Time {

@@ -17,7 +17,7 @@
           <input
             v-model="filterAction"
             type="text"
-            placeholder="操作 (如 login)"
+            placeholder="操作代码（如 login）"
             class="input-field !py-2 w-44"
             @keyup.enter="reload"
           />
@@ -56,13 +56,17 @@
                 </div>
               </td>
               <td class="py-3.5 px-4">
-                <span class="badge" :class="actionClass(log.action)">{{ log.action }}</span>
+                <span class="badge" :class="actionClass(log.action)" :title="`原始操作：${log.action}`">{{ operationText(log) }}</span>
               </td>
               <td class="py-3.5 px-4 text-muted-foreground">
-                <span v-if="log.target_type">{{ log.target_type }}<span v-if="log.target_id" class="text-muted-foreground">/{{ log.target_id }}</span></span>
+                <span v-if="log.target_type" class="badge bg-slate-100 text-slate-700 dark:bg-slate-500/15 dark:text-slate-300" :title="`${log.target_type}${log.target_id ? `/${log.target_id}` : ''}`">
+                  {{ targetLabel(log.target_type) }}<span v-if="log.target_id"> #{{ log.target_id }}</span>
+                </span>
                 <span v-else>—</span>
               </td>
-              <td class="py-3.5 px-4 text-foreground/80 max-w-xs truncate">{{ log.detail || '—' }}</td>
+              <td class="py-3.5 px-4 max-w-xs truncate">
+                <span class="badge" :class="actionClass(log.action)" :title="detailText(log)">{{ detailText(log) }}</span>
+              </td>
               <td class="py-3.5 px-6">
                 <code class="text-xs text-muted-foreground">{{ log.ip }}</code>
               </td>
@@ -126,6 +130,78 @@ function actionClass(action: string) {
   if (a.includes('create') || a.includes('register')) return 'bg-emerald-100 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300'
   if (a.includes('update') || a.includes('reset') || a.includes('change')) return 'bg-amber-100 text-amber-700 dark:bg-amber-500/15 dark:text-amber-300'
   return 'bg-indigo-100 text-indigo-700 dark:bg-indigo-500/15 dark:text-indigo-300'
+}
+
+const actionLabels: Record<string, string> = {
+  login: '登录',
+  logout: '退出登录',
+  fnos_login: '飞牛 NAS 登录',
+  fnos_bind: '绑定飞牛 NAS',
+  user_update: '修改用户信息',
+  user_delete: '删除用户',
+  user_status: '切换用户状态',
+  password_reset: '重置用户密码',
+}
+
+function actionLabel(action: string) {
+  const value = (action || '').toLowerCase()
+  if (actionLabels[value]) return actionLabels[value]
+  if (value.includes('reminder_items')) {
+    if (value.includes('complete')) return '完成提醒'
+    if (value.includes('restore')) return '恢复提醒'
+    if (value.includes('snooze')) return '稍后提醒'
+    if (value.startsWith('post_')) return '添加提醒'
+    if (value.startsWith('put_')) return '修改提醒'
+    if (value.startsWith('delete_')) return '删除提醒'
+    if (value.startsWith('get_')) return '查看提醒'
+  }
+  if (value.includes('reminder_lists')) {
+    if (value.startsWith('post_')) return '创建清单'
+    if (value.startsWith('patch_')) return '修改清单'
+    if (value.startsWith('delete_')) return '删除清单'
+    if (value.startsWith('get_')) return '查看清单'
+  }
+  if (value.includes('reminder_channels')) {
+    if (value.startsWith('post_')) return '测试通知方式'
+    if (value.startsWith('put_')) return '添加接收人'
+    if (value.startsWith('patch_')) return '修改通知方式'
+    if (value.startsWith('delete_')) return '删除接收人'
+    if (value.startsWith('get_')) return '查看通知方式'
+  }
+  if (value.includes('notifications')) {
+    if (value.includes('read-all')) return '全部标记已读'
+    if (value.includes('read')) return '标记通知已读'
+    if (value.startsWith('get_')) return '查看通知中心'
+  }
+  if (value.startsWith('get_')) return '查看数据'
+  if (value.startsWith('post_')) return '提交操作'
+  if (value.startsWith('put_') || value.startsWith('patch_')) return '修改数据'
+  if (value.startsWith('delete_')) return '删除数据'
+  return action || '未知操作'
+}
+
+function targetLabel(targetType: string) {
+  return ({
+    user: '用户',
+    reminder: '提醒',
+    list: '清单',
+    channel: '通知方式',
+    notification: '通知',
+    api: '系统接口',
+  } as Record<string, string>)[targetType] || targetType || ''
+}
+
+function operationText(log: any) {
+  // “操作”保持原来的 detail 字段；中文整理后的内容只放在“详情”列。
+  return String(log.detail || '').trim() || log.action || '—'
+}
+
+function detailText(log: any) {
+  const operation = actionLabel(log.action)
+  const target = targetLabel(log.target_type)
+  if (target && log.target_id) return `${operation}（对象：${target} #${log.target_id}）`
+  if (target && target !== '系统接口') return `${operation}（对象：${target}）`
+  return operation
 }
 
 onMounted(load)

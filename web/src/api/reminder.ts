@@ -59,6 +59,7 @@ export interface SaveReminderInput {
 
 export interface ChannelBindingItem {
   id: number
+  target: string
   target_masked: string
   status: string
 }
@@ -149,8 +150,8 @@ export const unbindChannel = (channel: ReminderChannel) =>
   request.delete(`/api/reminder/channels/${channel}`)
 export const unbindChannelTarget = (channel: ReminderChannel, id: number) =>
   request.delete(`/api/reminder/channels/${channel}/bindings/${id}`)
-export const testChannel = (channel: ReminderChannel) =>
-  request.post(`/api/reminder/channels/${channel}/test`)
+export const testChannel = (channel: ReminderChannel, target?: string, reminder?: Partial<SaveReminderInput>) =>
+  request.post(`/api/reminder/channels/${channel}/test`, target ? { target, reminder } : undefined)
 export const getProviderStatuses = () => request.get('/api/reminder/admin/providers')
 export const getNotificationBrand = () => request.get('/api/reminder/admin/notification-brand')
 export const saveNotificationBrand = (name: string) => request.put('/api/reminder/admin/notification-brand', { name })

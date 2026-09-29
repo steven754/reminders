@@ -88,8 +88,7 @@ type ReminderChannel struct {
 	Channel    string `gorm:"size:16;not null;uniqueIndex:idx_reminder_channel" json:"channel"`
 	Enabled    bool   `gorm:"not null;default:true" json:"enabled"`
 	// Targets stores a JSON array of ChannelBinding IDs this reminder delivers
-	// to. Only meaningful for the email channel; empty means every active
-	// binding of the user.
+	// to. Empty is kept for old reminders and means the legacy default target.
 	Targets   string    `gorm:"type:text" json:"-"`
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
@@ -204,13 +203,15 @@ type ChannelStatus struct {
 	TargetMasked string `json:"target_masked,omitempty"`
 	BotLink      string `json:"bot_link,omitempty"`
 	Description  string `json:"description"`
-	// Bindings lists every bound target for channels that allow more than
-	// one (currently email). Each item exposes only the masked address.
+	// Bindings lists the saved receiving targets for this channel. The plain
+	// target is returned only to the authenticated owner; the encrypted database
+	// value never leaves the API.
 	Bindings []ChannelBindingItem `json:"bindings,omitempty"`
 }
 
 type ChannelBindingItem struct {
 	ID           uint   `json:"id"`
+	Target       string `json:"target"`
 	TargetMasked string `json:"target_masked"`
 	Status       string `json:"status"`
 }

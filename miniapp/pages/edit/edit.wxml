@@ -90,11 +90,40 @@
 
     <view class="label">通知方式</view>
     <checkbox-group class="channels" bindchange="onChannelChange">
-      <label wx:for="{{channels}}" wx:key="channel" class="channel">
-        <checkbox value="{{item.channel}}" checked="{{selectedChannels.indexOf(item.channel) >= 0}}" color="#3182f6" />
+      <label wx:for="{{channels}}" wx:key="channel" class="channel {{item.configured ? '' : 'channel-disabled'}}">
+        <checkbox value="{{item.channel}}" disabled="{{item.channel !== 'inapp' && !item.configured}}" checked="{{selectedChannels.indexOf(item.channel) >= 0}}" color="#3182f6" />
         <text>{{item.label}}</text>
       </label>
     </checkbox-group>
+
+    <block wx:for="{{channels}}" wx:key="channel" wx:for-item="channel">
+      <block wx:if="{{channel.channel !== 'inapp' && channel.configured && selectedChannels.indexOf(channel.channel) >= 0}}">
+        <view class="recipient-box">
+          <view class="recipient-head">
+            <view>
+              <view class="recipient-title">{{channel.label}}接收人</view>
+              <view class="recipient-tip">每行选择一个，已选接收人不会出现在其他行</view>
+            </view>
+            <button class="recipient-add" size="mini" data-channel="{{channel.channel}}" bindtap="onAddRecipientRow">＋ 添加</button>
+          </view>
+          <view wx:if="{{channel.recipientRows.length}}">
+            <view wx:for="{{channel.recipientRows}}" wx:key="index" wx:for-item="row" wx:for-index="rowIndex" class="recipient-row">
+              <picker class="recipient-picker" mode="selector" range="{{row.options}}" range-key="target" value="{{row.index}}" bindchange="onRecipientChange" data-channel="{{channel.channel}}" data-row-index="{{rowIndex}}">
+                <view>{{row.id ? '更换接收人' : '请选择接收人'}}</view>
+              </picker>
+              <button class="recipient-clear" size="mini" data-channel="{{channel.channel}}" data-row-index="{{rowIndex}}" bindtap="onRemoveRecipientRow">−</button>
+              <button class="recipient-delete" size="mini" disabled="{{!row.id}}" data-channel="{{channel.channel}}" data-row-index="{{rowIndex}}" bindtap="onDeleteRecipientRow">删除</button>
+              <button class="recipient-test" size="mini" disabled="{{!row.id}}" data-channel="{{channel.channel}}" data-row-index="{{rowIndex}}" bindtap="onTestRecipientRow">测试发送</button>
+            </view>
+          </view>
+          <view wx:else class="recipient-empty">点击“＋ 添加”创建一行接收人</view>
+          <view class="recipient-new">
+            <input class="recipient-input" value="{{recipientDrafts[channel.channel] || ''}}" placeholder="新增接收人" data-channel="{{channel.channel}}" bindinput="onRecipientDraftInput" />
+            <button class="recipient-save" size="mini" data-channel="{{channel.channel}}" bindtap="onAddNewRecipient">保存并选择</button>
+          </view>
+        </view>
+      </block>
+    </block>
   </view>
 
   <button class="primary save" loading="{{saving}}" disabled="{{saving}}" bindtap="save">保存提醒</button>

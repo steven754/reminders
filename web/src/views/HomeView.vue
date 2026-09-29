@@ -79,9 +79,20 @@
             <div class="sm:col-span-2 lg:col-span-4">
               <p class="field-label mb-2">通知方式</p>
               <div class="flex flex-wrap gap-2">
-                <button v-for="channel in selectableChannels" :key="channel.channel" class="channel-pill" :class="{ selected: isQuickChannelSelected(channel.channel) }" :disabled="channel.channel !== 'inapp' && (!channel.bound || channel.status !== 'active')" @click="toggleQuickChannel(channel.channel)">
+                <button v-for="channel in selectableChannels" :key="channel.channel" class="channel-pill" :class="{ selected: isQuickChannelSelected(channel.channel) }" :disabled="channel.channel !== 'inapp' && !channel.configured" @click="toggleQuickChannel(channel.channel)">
                   {{ channel.label }}
                 </button>
+              </div>
+              <div v-if="quickRecipientChannels.length" class="mt-3 space-y-2">
+                <ChannelRecipientPicker
+                  v-for="channel in quickRecipientChannels"
+                  :key="channel.channel"
+                  :channel="channel"
+                  :model-value="quick.channel_targets?.[channel.channel] || []"
+                  :test-payload="quick"
+                  @update:model-value="setQuickTargets(channel.channel, $event)"
+                  @changed="reloadChannelStatuses"
+                />
               </div>
             </div>
             <!-- 底部提交按钮：手机端填完下方字段后无需滚回顶部再点添加 -->
@@ -197,21 +208,22 @@
               <div>
                 <p class="mb-3 text-xs font-bold text-muted-foreground">通知方式</p>
                 <div class="grid grid-cols-2 gap-2">
-                  <button v-for="channel in selectableChannels" :key="channel.channel" type="button" class="channel-option" :class="{ selected: isEditingChannelSelected(channel.channel) }" :disabled="channel.channel !== 'inapp' && (!channel.bound || channel.status !== 'active')" @click="toggleEditingChannel(channel.channel)">
+                  <button v-for="channel in selectableChannels" :key="channel.channel" type="button" class="channel-option" :class="{ selected: isEditingChannelSelected(channel.channel) }" :disabled="channel.channel !== 'inapp' && !channel.configured" @click="toggleEditingChannel(channel.channel)">
                     <span class="channel-check"><svg v-if="isEditingChannelSelected(channel.channel)" viewBox="0 0 24 24" class="h-3.5 w-3.5" fill="none" stroke="currentColor"><path d="m6 12 4 4 8-9" stroke-width="2.5" stroke-linecap="round"/></svg></span>
-                    <span class="text-left"><strong>{{ channel.label }}</strong><small>{{ channel.bound || channel.channel === 'inapp' ? '可用' : '未绑定' }}</small></span>
+                    <span class="text-left"><strong>{{ channel.label }}</strong><small>{{ channel.channel === 'inapp' || channel.configured ? (channel.bound ? '可用' : '需选接收人') : '未配置' }}</small></span>
                   </button>
                 </div>
                 <RouterLink to="/admin/channels" class="mt-3 inline-flex text-xs font-semibold text-brand-600 hover:underline dark:text-brand-300">管理通知方式 →</RouterLink>
-                <div v-if="isEditingChannelSelected('email') && emailBindings.length > 1" class="mt-4 rounded-2xl bg-muted/65 p-3">
-                  <p class="mb-2 text-xs font-bold text-muted-foreground">这个提醒发送到</p>
-                  <div class="flex flex-wrap gap-2">
-                    <button type="button" class="channel-pill" :class="{ selected: editingEmailTargets.length === 0 }" @click="clearEditingEmailTargets">全部接收邮箱</button>
-                    <button v-for="binding in emailBindings" :key="binding.id" type="button" class="channel-pill" :class="{ selected: editingEmailTargets.includes(binding.id) }" @click="toggleEditingEmailTarget(binding.id)">
-                      {{ binding.target_masked }}
-                    </button>
-                  </div>
-                  <p class="mt-2 text-[10px] leading-4 text-muted-foreground">选择“全部接收邮箱”时不指定具体邮箱；所选邮箱被删除后会自动改发全部已启用的邮箱。</p>
+                <div v-if="editingRecipientChannels.length" class="mt-4 space-y-2">
+                  <ChannelRecipientPicker
+                    v-for="channel in editingRecipientChannels"
+                    :key="channel.channel"
+                    :channel="channel"
+                    :model-value="editing.channel_targets?.[channel.channel] || []"
+                    :test-payload="editing"
+                    @update:model-value="setEditingTargets(channel.channel, $event)"
+                    @changed="reloadChannelStatuses"
+                  />
                 </div>
               </div>
             </div>
@@ -247,6 +259,7 @@ import ConfirmDialog from '../components/ConfirmDialog.vue'
 import LunarDatePicker from '../components/LunarDatePicker.vue'
 import CronRuleEditor from '../components/CronRuleEditor.vue'
 import RepeatNotifySelect from '../components/RepeatNotifySelect.vue'
+import ChannelRecipientPicker from '../components/ChannelRecipientPicker.vue'
 import {
   completeReminder, createReminder, deleteReminder, getChannelStatuses, getLists, getReminders,
   restoreReminder, snoozeReminder, updateReminder,
@@ -271,7 +284,7 @@ const toast = reactive<{ message: string; type: 'success' | 'error' }>({ message
 
 const blankInput = (): SaveReminderInput => ({
   title: '', notes: '', list_id: 0, priority: 0, due_at: null, end_at: null,
-  all_day: false, repeat_rule: 'none', cron_expr: '', calendar: 'solar', repeat_notify_minutes: 0, channels: ['inapp'],
+  all_day: false, repeat_rule: 'none', cron_expr: '', calendar: 'solar', repeat_notify_minutes: 0, channels: ['inapp'], channel_targets: {},
 })
 const quick = reactive<SaveReminderInput>(blankInput())
 const editing = reactive<SaveReminderInput & { id?: number }>(blankInput())
@@ -349,12 +362,7 @@ async function loadData() {
     const [listRes, channelRes] = await Promise.all([getLists(), getChannelStatuses()])
     lists.value = listRes.data.data || []
     selectableChannels.value = channelRes.data.data || []
-    if (!quickChannelsTouched) {
-      quick.channels = selectableChannels.value
-        .filter(channel => channel.channel === 'inapp' || (channel.bound && channel.status === 'active'))
-        .map(channel => channel.channel)
-      if (!quick.channels.length) quick.channels = ['inapp']
-    }
+    if (!quickChannelsTouched) quick.channels = ['inapp']
     if (!quick.list_id) quick.list_id = selectedListID.value || lists.value.find(x => x.is_default)?.id || lists.value[0]?.id || 0
     await loadItems()
   } catch (err: any) {
@@ -385,6 +393,11 @@ async function submitQuick() {
   if (!quick.title?.trim() || saving.value) return
   if (quick.repeat_rule === 'cron' && !quick.cron_expr?.trim()) {
     showToast('请输入 Cron 表达式', 'error')
+    return
+  }
+  const missingQuick = quickRecipientChannels.value.find(channel => !(quick.channel_targets?.[channel.channel] || []).length)
+  if (missingQuick) {
+    showToast(`请为${missingQuick.label}选择或添加接收人`, 'error')
     return
   }
   saving.value = true
@@ -432,24 +445,38 @@ function toggleQuickChannel(channel: ReminderChannel) {
   const list = quick.channels || []
   quick.channels = list.includes(channel) ? list.filter(x => x !== channel) : [...list, channel]
   if (!quick.channels.length) quick.channels = ['inapp']
+  if (!quick.channels.includes(channel) && quick.channel_targets) {
+    const next = { ...quick.channel_targets }
+    delete next[channel]
+    quick.channel_targets = next
+  }
 }
 function isQuickChannelSelected(channel: ReminderChannel) { return (quick.channels || []).includes(channel) }
 function toggleEditingChannel(channel: ReminderChannel) {
   const list = editing.channels || []
   editing.channels = list.includes(channel) ? list.filter(x => x !== channel) : [...list, channel]
   if (!editing.channels.length) editing.channels = ['inapp']
-  if (!editing.channels.includes('email')) editing.channel_targets = undefined
+  if (!editing.channels.includes(channel) && editing.channel_targets) {
+    const next = { ...editing.channel_targets }
+    delete next[channel]
+    editing.channel_targets = next
+  }
 }
 function isEditingChannelSelected(channel: ReminderChannel) { return (editing.channels || []).includes(channel) }
-const emailBindings = computed(() => selectableChannels.value.find(channel => channel.channel === 'email')?.bindings || [])
-const editingEmailTargets = computed(() => editing.channel_targets?.email || [])
-function toggleEditingEmailTarget(id: number) {
-  const picked = new Set(editing.channel_targets?.email || [])
-  if (picked.has(id)) picked.delete(id)
-  else picked.add(id)
-  editing.channel_targets = picked.size ? { email: [...picked] } : undefined
+const quickRecipientChannels = computed(() => selectableChannels.value.filter(channel => channel.channel !== 'inapp' && quick.channels?.includes(channel.channel)))
+const editingRecipientChannels = computed(() => selectableChannels.value.filter(channel => channel.channel !== 'inapp' && editing.channels?.includes(channel.channel)))
+function setQuickTargets(channel: ReminderChannel, ids: number[]) {
+  quick.channel_targets = { ...(quick.channel_targets || {}), [channel]: ids }
 }
-function clearEditingEmailTargets() { editing.channel_targets = undefined }
+function setEditingTargets(channel: ReminderChannel, ids: number[]) {
+  editing.channel_targets = { ...(editing.channel_targets || {}), [channel]: ids }
+}
+async function reloadChannelStatuses() {
+  try {
+    const res = await getChannelStatuses()
+    selectableChannels.value = res.data.data || []
+  } catch { /* 保存提醒时后端仍会再次校验接收人 */ }
+}
 
 watch(() => quick.repeat_rule, rule => {
   quick.calendar = 'solar'
@@ -489,6 +516,11 @@ async function saveEditor() {
   if (!editing.id || !editing.title?.trim()) return
   if (editing.repeat_rule === 'cron' && !editing.cron_expr?.trim()) {
     showToast('请输入 Cron 表达式', 'error')
+    return
+  }
+  const missingEditing = editingRecipientChannels.value.find(channel => !(editing.channel_targets?.[channel.channel] || []).length)
+  if (missingEditing) {
+    showToast(`请为${missingEditing.label}选择或添加接收人`, 'error')
     return
   }
   saving.value = true

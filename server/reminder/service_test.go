@@ -28,10 +28,11 @@ func TestCreateAndUpdateReminderRebuildsJobIdempotently(t *testing.T) {
 	cleanup := testDB(t)
 	defer cleanup()
 
+	email := createEmailBinding(t, 42, "test@example.com", "active")
 	due := time.Now().Add(2 * time.Hour).Truncate(time.Second)
 	created, err := createReminder(appDB, 42, SaveReminderInput{
 		Title: "测试提醒", DueAt: &due, RepeatRule: "none",
-		Channels: []string{ChannelInApp, ChannelEmail},
+		Channels: []string{ChannelInApp, ChannelEmail}, ChannelTargets: map[string][]uint{ChannelEmail: {email.ID}},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -43,7 +44,8 @@ func TestCreateAndUpdateReminderRebuildsJobIdempotently(t *testing.T) {
 	created.Notes = "更新备注但不改变时间"
 	updated, err := updateReminder(appDB, 42, created.ID, SaveReminderInput{
 		Title: created.Title, Notes: created.Notes, ListID: created.ListID,
-		DueAt: &due, RepeatRule: "none", Channels: created.Channels, Version: created.Version,
+		DueAt: &due, RepeatRule: "none", Channels: created.Channels,
+		ChannelTargets: map[string][]uint{ChannelEmail: {email.ID}}, Version: created.Version,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -350,9 +352,11 @@ func TestListRemindersLoadsRelatedDataInConstantQueries(t *testing.T) {
 	defer cleanup()
 
 	const userID = 55
+	email := createEmailBinding(t, userID, "batch@example.com", "active")
 	for i := 0; i < 30; i++ {
 		_, err := createReminder(appDB, userID, SaveReminderInput{
 			Title: "批量提醒", RepeatRule: "none", Channels: []string{ChannelInApp, ChannelEmail},
+			ChannelTargets: map[string][]uint{ChannelEmail: {email.ID}},
 		})
 		if err != nil {
 			t.Fatal(err)

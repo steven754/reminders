@@ -107,6 +107,45 @@ function parseIntervalExpression(expr) {
   }
 }
 
+function recipientRowsFor(channel, rows) {
+  const bindings = (channel.bindings || []).filter(item => item.status === 'active')
+  const used = new Set(rows.filter(row => row.id).map(row => row.id))
+  return rows.map(row => {
+    const options = bindings.filter(binding => binding.id === row.id || !used.has(binding.id))
+    return { id: row.id || 0, options, index: Math.max(0, options.findIndex(binding => binding.id === row.id)) }
+  })
+}
+
+function validateReminderDraft(data) {
+  if (!data.title || !data.title.trim()) return '请输入提醒标题'
+  if (!data.startDate || !data.startTime) return '请选择开始时间'
+  if (data.repeatRule === 'cron' && !data.cronExpr.trim()) return '请输入 Cron 表达式'
+  if (data.repeatRule !== 'none' && data.repeatRule !== 'cron' && data.timeMode === 'range' && !data.generatedCron) return '间隔必须小于时间段总长'
+  if (data.repeatRule !== 'none' && data.endDate && data.endTime) {
+    const start = new Date(`${data.startDate}T${data.startTime}:00`)
+    const end = new Date(`${data.endDate}T${data.endTime}:00`)
+    if (end <= start) return '结束时间必须晚于开始时间'
+  }
+  return ''
+}
+
+function buildReminderPayload(data) {
+  return {
+    title: data.title.trim(),
+    notes: data.notes.trim(),
+    list_id: data.listId,
+    priority: 0,
+    due_at: localISO(data.startDate, data.startTime),
+    end_at: data.repeatRule !== 'none' && data.endDate && data.endTime ? localISO(data.endDate, data.endTime) : null,
+    all_day: false,
+    repeat_rule: data.repeatRule,
+    cron_expr: data.repeatRule === 'cron' ? data.cronExpr.trim() : data.generatedCron,
+    calendar: 'solar',
+    channels: data.selectedChannels.length ? data.selectedChannels : ['inapp'],
+    channel_targets: data.channelTargets,
+  }
+}
+
 Page({
   data: {
     id: '',
@@ -149,6 +188,8 @@ Page({
     listIndex: 0,
     channels: [],
     selectedChannels: ['inapp'],
+    channelTargets: {},
+    recipientDrafts: {},
     loading: false,
     saving: false,
   },
@@ -167,8 +208,7 @@ Page({
         request({ url: '/api/reminder/lists' }),
         request({ url: '/api/reminder/channels' }),
       ])
-      const usable = (channelStatuses || []).filter(channel => channel.channel === 'inapp' || (channel.bound && channel.status === 'active'))
-      const data = { lists: lists || [], channels: usable }
+      const data = { lists: lists || [], channels: (channelStatuses || []).map(channel => ({ ...channel, recipientRows: [] })) }
       if (!id && lists && lists.length) {
         const defaultIndex = lists.findIndex(item => item.is_default)
         data.listIndex = defaultIndex >= 0 ? defaultIndex : 0
@@ -203,7 +243,8 @@ Page({
       listId: item.list_id,
       listIndex: listIndex >= 0 ? listIndex : 0,
       selectedChannels: item.channels && item.channels.length ? item.channels : ['inapp'],
-    })
+      channelTargets: item.channel_targets || {},
+    }, () => this.syncRecipientRows())
     this.refreshGeneratedCron({
       repeatRule: item.repeat_rule || 'none',
       startTime: start.time,
@@ -307,49 +348,151 @@ Page({
   },
 
   onChannelChange(event) {
-    this.setData({ selectedChannels: event.detail.value.length ? event.detail.value : ['inapp'] })
+    const selectedChannels = event.detail.value.length ? event.detail.value : ['inapp']
+    const channelTargets = { ...this.data.channelTargets }
+    Object.keys(channelTargets).forEach(channel => {
+      if (!selectedChannels.includes(channel)) delete channelTargets[channel]
+    })
+    this.setData({ selectedChannels, channelTargets }, () => this.syncRecipientRows())
+  },
+
+  syncRecipientRows() {
+    const targets = this.data.channelTargets || {}
+    const channels = this.data.channels.map(channel => {
+      const selected = (targets[channel.channel] || []).map(id => ({ id }))
+      const emptyCount = (channel.recipientRows || []).filter(row => !row.id).length
+      const rows = selected.concat(Array.from({ length: emptyCount }, () => ({ id: 0 })))
+      return { ...channel, recipientRows: recipientRowsFor(channel, rows) }
+    })
+    this.setData({ channels })
+  },
+
+  onAddRecipientRow(event) {
+    const channelName = event.currentTarget.dataset.channel
+    const channels = this.data.channels.map(channel => channel.channel === channelName
+      ? { ...channel, recipientRows: recipientRowsFor(channel, [...(channel.recipientRows || []), { id: 0 }]) }
+      : channel)
+    this.setData({ channels })
+  },
+
+  onRecipientChange(event) {
+    const channelName = event.currentTarget.dataset.channel
+    const rowIndex = Number(event.currentTarget.dataset.rowIndex)
+    const optionIndex = Number(event.detail.value)
+    const channel = this.data.channels.find(item => item.channel === channelName)
+    const row = channel && channel.recipientRows[rowIndex]
+    const binding = row && row.options[optionIndex]
+    if (!channel || !row || !binding) return
+    const rows = channel.recipientRows.map((item, index) => index === rowIndex ? { ...item, id: binding.id } : item)
+    const selected = rows.filter(item => item.id).map(item => item.id)
+    if (new Set(selected).size !== selected.length) {
+      wx.showToast({ title: '接收人不能重复', icon: 'none' })
+      return
+    }
+    const channelTargets = { ...this.data.channelTargets, [channelName]: selected }
+    const channels = this.data.channels.map(item => item.channel === channelName
+      ? { ...item, recipientRows: recipientRowsFor(item, rows) }
+      : item)
+    this.setData({ channels, channelTargets })
+  },
+
+  onRemoveRecipientRow(event) {
+    const channelName = event.currentTarget.dataset.channel
+    const rowIndex = Number(event.currentTarget.dataset.rowIndex)
+    const channel = this.data.channels.find(item => item.channel === channelName)
+    if (!channel || !channel.recipientRows[rowIndex]) return
+    const rows = channel.recipientRows.filter((_, index) => index !== rowIndex)
+    const channelTargets = { ...this.data.channelTargets, [channelName]: rows.filter(item => item.id).map(item => item.id) }
+    const channels = this.data.channels.map(item => item.channel === channelName
+      ? { ...item, recipientRows: recipientRowsFor(item, rows) }
+      : item)
+    this.setData({ channels, channelTargets })
+  },
+
+  async onDeleteRecipientRow(event) {
+    const channelName = event.currentTarget.dataset.channel
+    const rowIndex = Number(event.currentTarget.dataset.rowIndex)
+    const channel = this.data.channels.find(item => item.channel === channelName)
+    const row = channel && channel.recipientRows[rowIndex]
+    if (!channel || !row) return
+    try {
+      if (row.id) await request({ url: `/api/reminder/channels/${channelName}/bindings/${row.id}`, method: 'DELETE' })
+      const rows = channel.recipientRows.filter((_, index) => index !== rowIndex)
+      const channelTargets = { ...this.data.channelTargets, [channelName]: rows.filter(item => item.id).map(item => item.id) }
+      const channels = this.data.channels.map(item => item.channel === channelName
+        ? { ...item, bindings: (item.bindings || []).filter(binding => binding.id !== row.id), recipientRows: recipientRowsFor({ ...item, bindings: (item.bindings || []).filter(binding => binding.id !== row.id) }, rows) }
+        : item)
+      this.setData({ channels, channelTargets })
+    } catch (err) {
+      wx.showToast({ title: err.message || '删除接收人失败', icon: 'none' })
+    }
+  },
+
+  async onTestRecipientRow(event) {
+    const channelName = event.currentTarget.dataset.channel
+    const rowIndex = Number(event.currentTarget.dataset.rowIndex)
+    const channel = this.data.channels.find(item => item.channel === channelName)
+    const row = channel && channel.recipientRows[rowIndex]
+    const binding = row && (channel.bindings || []).find(item => item.id === row.id && item.status === 'active')
+    if (!binding || !binding.target) {
+      wx.showToast({ title: '接收者信息不可用，请重新添加', icon: 'none' })
+      return
+    }
+    const validationError = validateReminderDraft(this.data)
+    if (validationError) {
+      wx.showToast({ title: `${validationError}后再测试`, icon: 'none' })
+      return
+    }
+    wx.showLoading({ title: '发送中…', mask: true })
+    try {
+      await request({ url: `/api/reminder/channels/${channelName}/test`, method: 'POST', data: { target: binding.target, reminder: buildReminderPayload(this.data) } })
+      wx.showToast({ title: '测试发送成功', icon: 'success' })
+    } catch (err) {
+      wx.showToast({ title: err.message || '测试发送失败', icon: 'none' })
+    } finally {
+      wx.hideLoading()
+    }
+  },
+
+  onRecipientDraftInput(event) {
+    const channel = event.currentTarget.dataset.channel
+    this.setData({ [`recipientDrafts.${channel}`]: event.detail.value })
+  },
+
+  async onAddNewRecipient(event) {
+    const channelName = event.currentTarget.dataset.channel
+    const target = (this.data.recipientDrafts[channelName] || '').trim()
+    if (!target) return
+    try {
+      const binding = await request({ url: `/api/reminder/channels/${channelName}`, method: 'PUT', data: { target } })
+      const channelTargets = { ...this.data.channelTargets, [channelName]: [...(this.data.channelTargets[channelName] || []), binding.id] }
+      const channels = this.data.channels.map(channel => {
+        if (channel.channel !== channelName) return channel
+        const nextChannel = { ...channel, bindings: [...(channel.bindings || []), { ...binding, target: binding.target || binding.target_masked }] }
+        return { ...nextChannel, recipientRows: recipientRowsFor(nextChannel, [...(channel.recipientRows || []), { id: binding.id }]) }
+      })
+      this.setData({ channels, channelTargets, [`recipientDrafts.${channelName}`]: '' })
+    } catch (err) {
+      wx.showToast({ title: err.message || '保存接收人失败', icon: 'none' })
+    }
   },
 
   async save() {
-    if (!this.data.title.trim()) {
-      wx.showToast({ title: '请输入提醒标题', icon: 'none' })
+    const validationError = validateReminderDraft(this.data)
+    if (validationError) {
+      wx.showToast({ title: validationError, icon: 'none' })
       return
     }
-    if (!this.data.startDate || !this.data.startTime) {
-      wx.showToast({ title: '请选择开始时间', icon: 'none' })
-      return
-    }
-    if (this.data.repeatRule === 'cron' && !this.data.cronExpr.trim()) {
-      wx.showToast({ title: '请输入 Cron 表达式', icon: 'none' })
-      return
-    }
-    if (this.data.repeatRule !== 'none' && this.data.repeatRule !== 'cron' && this.data.timeMode === 'range' && !this.data.generatedCron) {
-      wx.showToast({ title: '间隔必须小于时间段总长', icon: 'none' })
-      return
-    }
-    if (this.data.repeatRule !== 'none' && this.data.endDate && this.data.endTime) {
-      const start = new Date(`${this.data.startDate}T${this.data.startTime}:00`)
-      const end = new Date(`${this.data.endDate}T${this.data.endTime}:00`)
-      if (end <= start) {
-        wx.showToast({ title: '结束时间必须晚于开始时间', icon: 'none' })
+    for (const channel of this.data.selectedChannels) {
+      if (channel !== 'inapp' && !(this.data.channelTargets[channel] || []).length) {
+        const item = this.data.channels.find(entry => entry.channel === channel)
+        wx.showToast({ title: `${item ? item.label : channel}至少选择一个接收人`, icon: 'none' })
         return
       }
     }
     this.setData({ saving: true })
     try {
-      const payload = {
-        title: this.data.title.trim(),
-        notes: this.data.notes.trim(),
-        list_id: this.data.listId,
-        priority: 0,
-        due_at: localISO(this.data.startDate, this.data.startTime),
-        end_at: this.data.repeatRule !== 'none' && this.data.endDate && this.data.endTime ? localISO(this.data.endDate, this.data.endTime) : null,
-        all_day: false,
-        repeat_rule: this.data.repeatRule,
-        cron_expr: this.data.repeatRule === 'cron' ? this.data.cronExpr.trim() : this.data.generatedCron,
-        calendar: 'solar',
-        channels: this.data.selectedChannels.length ? this.data.selectedChannels : ['inapp'],
-      }
+      const payload = buildReminderPayload(this.data)
       if (this.data.id) {
         const item = await request({ url: `/api/reminder/items/${this.data.id}`, method: 'GET' })
         payload.version = item.version

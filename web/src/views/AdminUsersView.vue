@@ -112,7 +112,7 @@
               <td class="py-3.5 px-4 text-muted-foreground whitespace-nowrap">{{ user.created_at }}</td>
               <td class="py-3.5 px-6">
                 <div class="flex items-center justify-end gap-1">
-                  <button @click="handleToggleStatus(user)" :title="user.status === 1 ? '禁用' : '启用'" class="icon-btn hover:text-amber-600 hover:bg-amber-50 dark:hover:bg-amber-500/10">
+                  <button @click="handleToggleStatus(user)" :title="user.status === 1 ? '禁用用户' : '启用用户'" :aria-label="user.status === 1 ? '禁用用户' : '启用用户'" class="icon-btn hover:text-amber-600 hover:bg-amber-50 dark:hover:bg-amber-500/10">
                     <svg v-if="user.status === 1" class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728L5.636 5.636"/></svg>
                     <svg v-else class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
                   </button>
@@ -197,6 +197,8 @@
     >
       <p v-if="deleteError" class="mt-2 rounded-lg bg-rose-500/10 px-3 py-2 text-xs text-rose-500">{{ deleteError }}</p>
     </ConfirmDialog>
+
+    <Toast :message="toast.message" :type="toast.type" />
   </div>
 </template>
 
@@ -205,6 +207,7 @@ import { ref, computed, onMounted } from 'vue'
 import { getUsers, toggleUserStatus, deleteUser, resetUserPassword } from '../api/user'
 import { passwordValidationError } from '../utils/password'
 import ConfirmDialog from '../components/ConfirmDialog.vue'
+import Toast from '../components/Toast.vue'
 
 const users = ref<any[]>([])
 const search = ref('')
@@ -225,6 +228,7 @@ const resetTarget = ref<any>(null)
 const resetNewPassword = ref('')
 const resetLoading = ref(false)
 const resetMsg = ref('')
+const toast = ref<{ message: string; type: 'success' | 'error' }>({ message: '', type: 'success' })
 
 const avatarPalette = [
   'bg-gradient-to-br from-indigo-500 to-purple-500',
@@ -285,8 +289,15 @@ function nextPage() {
 async function handleToggleStatus(user: any) {
   try {
     const res = await toggleUserStatus(user.id)
-    if (res.data?.code === 0) await loadUsers()
-  } catch {}
+    if (res.data?.code === 0) {
+      await loadUsers()
+      showToast(user.status === 1 ? '用户已禁用' : '用户已启用')
+    } else {
+      showToast(res.data?.message || '更新用户状态失败', 'error')
+    }
+  } catch (err: any) {
+    showToast(err.response?.data?.message || '更新用户状态失败，请重试', 'error')
+  }
 }
 
 // 删除确认走应用内浮层（见 ConfirmDialog）。失败必须留在浮层里说出来：
@@ -348,6 +359,11 @@ async function confirmResetPassword() {
   } finally {
     resetLoading.value = false
   }
+}
+
+function showToast(message: string, type: 'success' | 'error' = 'success') {
+  toast.value = { message: '', type }
+  setTimeout(() => { toast.value = { message, type } }, 0)
 }
 </script>
 

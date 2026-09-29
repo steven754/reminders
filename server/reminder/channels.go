@@ -187,18 +187,16 @@ func handleBindChannel(db *gorm.DB) gin.HandlerFunc {
 			response.ErrorBadRequest(c, err.Error())
 			return
 		}
-		// Email allows several receiving mailboxes per user; every other
-		// channel keeps the single-binding replace semantics below.
-		if channel == ChannelEmail {
-			duplicate, err := emailTargetExists(db, currentUserID(c), target)
-			if err != nil {
-				response.ErrorInternal(c, "读取已有绑定失败")
-				return
-			}
-			if duplicate {
-				response.ErrorBadRequest(c, "该邮箱已绑定过")
-				return
-			}
+		// Every external channel can have several saved receiving targets. The
+		// reminder editor decides which of them receive a particular reminder.
+		duplicate, err := channelTargetExists(db, currentUserID(c), channel, target)
+		if err != nil {
+			response.ErrorInternal(c, "读取已有接收人失败")
+			return
+		}
+		if duplicate {
+			response.ErrorBadRequest(c, "该接收人已经添加过")
+			return
 		}
 		encrypted, err := encryptTarget(db, target)
 		if err != nil {
@@ -210,30 +208,34 @@ func handleBindChannel(db *gorm.DB) gin.HandlerFunc {
 			UserID: currentUserID(c), Channel: channel, Target: encrypted,
 			TargetMasked: maskTarget(channel, target), Status: "active", VerifiedAt: &now,
 		}
-		var saveErr error
-		if channel == ChannelEmail {
-			saveErr = db.Create(&binding).Error
-		} else {
-			saveErr = db.Where("user_id = ? AND channel = ?", binding.UserID, channel).
-				Assign(map[string]interface{}{
-					"target": encrypted, "target_masked": binding.TargetMasked,
-					"status": "active", "verified_at": &now, "last_error_code": "",
-				}).FirstOrCreate(&binding).Error
-		}
-		if saveErr != nil {
+		if err := db.Create(&binding).Error; err != nil {
 			response.ErrorInternal(c, "保存绑定失败")
 			return
 		}
 		publishDataChanged(binding.UserID, "channel", "bound", binding.ID, originClientID(c))
-		response.Success(c, binding)
+		response.Success(c, channelBindingItem(db, binding))
 	}
 }
 
-// emailTargetExists compares the plaintext of existing email bindings, since
-// the encrypted target is randomised and cannot be de-duplicated in SQL.
-func emailTargetExists(db *gorm.DB, userID uint, target string) (bool, error) {
+// channelBindingItem is returned only to the authenticated owner of the
+// binding. The database value remains encrypted, while the reminder editor
+// receives the plain target so a user can identify a saved recipient in a
+// dropdown without seeing a misleading masked value.
+func channelBindingItem(db *gorm.DB, binding ChannelBinding) ChannelBindingItem {
+	item := ChannelBindingItem{
+		ID: binding.ID, TargetMasked: binding.TargetMasked, Status: binding.Status,
+	}
+	if target, err := decryptTarget(db, binding.Target); err == nil {
+		item.Target = target
+	}
+	return item
+}
+
+// channelTargetExists compares decrypted targets, since encrypted values are
+// randomised and cannot be de-duplicated in SQL.
+func channelTargetExists(db *gorm.DB, userID uint, channel, target string) (bool, error) {
 	var bindings []ChannelBinding
-	if err := db.Where("user_id = ? AND channel = ?", userID, ChannelEmail).Find(&bindings).Error; err != nil {
+	if err := db.Where("user_id = ? AND channel = ?", userID, channel).Find(&bindings).Error; err != nil {
 		return false, err
 	}
 	for _, binding := range bindings {
@@ -246,6 +248,12 @@ func emailTargetExists(db *gorm.DB, userID uint, target string) (bool, error) {
 		}
 	}
 	return false, nil
+}
+
+// emailTargetExists is kept as a small compatibility wrapper for old tests
+// and internal callers.
+func emailTargetExists(db *gorm.DB, userID uint, target string) (bool, error) {
+	return channelTargetExists(db, userID, ChannelEmail, target)
 }
 
 func handleDeleteChannelBinding(db *gorm.DB) gin.HandlerFunc {
@@ -318,8 +326,55 @@ func handleTestChannel(db *gorm.DB) gin.HandlerFunc {
 			return
 		}
 		userID := currentUserID(c)
+		var target string
+		var reminderInput *SaveReminderInput
+		if channel != ChannelInApp {
+			var in struct {
+				Target   string             `json:"target"`
+				Reminder *SaveReminderInput `json:"reminder"`
+			}
+			if err := c.ShouldBindJSON(&in); err != nil {
+				response.ErrorBadRequest(c, "请填写测试接收者")
+				return
+			}
+			reminderInput = in.Reminder
+			var err error
+			target, err = normalizeTarget(channel, in.Target)
+			if err != nil {
+				response.ErrorBadRequest(c, err.Error())
+				return
+			}
+			if channel == ChannelFeishu {
+				target, err = resolveFeishuOpenID(c.Request.Context(), db, target)
+				if err != nil {
+					response.ErrorBadRequest(c, err.Error())
+					return
+				}
+			}
+		}
 		item := Reminder{ID: 0, UserID: userID, Title: "这是一条测试提醒", Notes: "渠道已经连接成功。"}
-		result, err := sendChannel(c.Request.Context(), db, channel, userID, item, "test-"+strconv.FormatInt(time.Now().UnixNano(), 10), nil)
+		if reminderInput != nil {
+			if err := validateReminderInput(reminderInput); err != nil {
+				response.ErrorBadRequest(c, err.Error())
+				return
+			}
+			item = Reminder{
+				ID: 0, UserID: userID, Title: reminderInput.Title, Notes: reminderInput.Notes,
+				DueAt: reminderInput.DueAt, EndAt: reminderInput.EndAt, AllDay: reminderInput.AllDay,
+				RepeatRule: reminderInput.RepeatRule, CronExpr: reminderInput.CronExpr,
+				Calendar: reminderInput.Calendar, LunarAnchor: reminderInput.LunarAnchor,
+				RepeatNotifyMinutes: reminderInput.RepeatNotifyMinutes,
+			}
+		}
+		var result sendResult
+		var err error
+		if channel == ChannelInApp {
+			result, err = sendChannel(c.Request.Context(), db, channel, userID, item, "test-"+strconv.FormatInt(time.Now().UnixNano(), 10), nil)
+		} else if channel == ChannelEmail {
+			result, err = sendEmail(db, []string{target}, item)
+		} else {
+			result, err = sendChannelTarget(c.Request.Context(), db, channel, target, item, "test-"+strconv.FormatInt(time.Now().UnixNano(), 10))
+		}
 		if err != nil {
 			response.ErrorBadRequest(c, err.Error())
 			return
@@ -402,14 +457,8 @@ func channelStatuses(db *gorm.DB, userID uint) []ChannelStatus {
 				break
 			}
 		}
-		// Only email surfaces each target individually so the UI can add or
-		// remove addresses one by one.
-		if defs[i].Channel == ChannelEmail {
-			for _, binding := range list {
-				defs[i].Bindings = append(defs[i].Bindings, ChannelBindingItem{
-					ID: binding.ID, TargetMasked: binding.TargetMasked, Status: binding.Status,
-				})
-			}
+		for _, binding := range list {
+			defs[i].Bindings = append(defs[i].Bindings, channelBindingItem(db, binding))
 		}
 	}
 	return defs
@@ -632,8 +681,9 @@ func stringValue(value []byte, err error) (string, error) {
 }
 
 // sendChannel delivers one reminder occurrence on one channel. targetIDs
-// narrows multi-target channels (email) to specific bindings; nil or empty
-// delivers to every active binding.
+// selects the saved receiving targets for this reminder. An empty target list
+// is supported only for old reminders created before per-channel recipients
+// became required: email uses all active targets, other channels use the first.
 func sendChannel(ctx context.Context, db *gorm.DB, channel string, userID uint, item Reminder, idempotencyKey string, targetIDs []uint) (sendResult, error) {
 	if channel == ChannelInApp {
 		n := Notification{UserID: userID, Type: "reminder_due", Title: item.Title, Body: notificationBody(item)}
@@ -646,30 +696,68 @@ func sendChannel(ctx context.Context, db *gorm.DB, channel string, userID uint, 
 		publishNotification(n)
 		return sendResult{ExternalID: strconv.FormatUint(uint64(n.ID), 10)}, nil
 	}
-	// Email resolves its (possibly multiple) recipients inside the switch;
-	// every other channel still delivers to exactly one bound target.
-	var target string
-	if channel != ChannelEmail {
-		var binding ChannelBinding
-		if err := db.Where("user_id = ? AND channel = ? AND status = ?", userID, channel, "active").First(&binding).Error; err != nil {
-			return sendResult{}, &deliveryError{Code: "CHANNEL_NOT_BOUND", Message: "该通知渠道尚未绑定或已停用", Permanent: true}
-		}
-		decrypted, err := decryptTarget(db, binding.Target)
-		if err != nil {
-			return sendResult{}, &deliveryError{Code: "TARGET_DECRYPT_FAILED", Message: "读取渠道绑定信息失败", Permanent: true}
-		}
-		target = decrypted
+	bindings, err := deliveryBindings(db, userID, channel, targetIDs)
+	if err != nil {
+		return sendResult{}, err
 	}
-	switch channel {
-	case ChannelEmail:
-		recipients, err := activeEmailRecipients(db, userID, targetIDs)
-		if err != nil {
-			return sendResult{}, &deliveryError{Code: "TARGET_DECRYPT_FAILED", Message: "读取渠道绑定信息失败", Permanent: true}
-		}
-		if len(recipients) == 0 {
-			return sendResult{}, &deliveryError{Code: "CHANNEL_NOT_BOUND", Message: "该通知渠道尚未绑定或已停用", Permanent: true}
+	if channel == ChannelEmail {
+		recipients := make([]string, 0, len(bindings))
+		for _, binding := range bindings {
+			target, err := decryptTarget(db, binding.Target)
+			if err != nil {
+				return sendResult{}, &deliveryError{Code: "TARGET_DECRYPT_FAILED", Message: "读取渠道绑定信息失败", Permanent: true}
+			}
+			recipients = append(recipients, target)
 		}
 		return sendEmail(db, recipients, item)
+	}
+
+	var result sendResult
+	for _, binding := range bindings {
+		target, err := decryptTarget(db, binding.Target)
+		if err != nil {
+			return sendResult{}, &deliveryError{Code: "TARGET_DECRYPT_FAILED", Message: "读取渠道绑定信息失败", Permanent: true}
+		}
+		result, err = sendChannelTarget(ctx, db, channel, target, item, idempotencyKey)
+		if err != nil {
+			return sendResult{}, err
+		}
+	}
+	return result, nil
+}
+
+func deliveryBindings(db *gorm.DB, userID uint, channel string, targetIDs []uint) ([]ChannelBinding, error) {
+	ids := dedupeUint(targetIDs)
+	var bindings []ChannelBinding
+	query := db.Where("user_id = ? AND channel = ? AND status = ?", userID, channel, "active").Order("id ASC")
+	if len(ids) > 0 {
+		if err := query.Where("id IN ?", ids).Find(&bindings).Error; err != nil {
+			return nil, &deliveryError{Code: "TARGET_LOOKUP_FAILED", Message: "读取接收人失败"}
+		}
+		if len(bindings) != len(ids) {
+			return nil, &deliveryError{Code: "CHANNEL_TARGET_MISSING", Message: "提醒使用的接收人不存在或已停用", Permanent: true}
+		}
+		return bindings, nil
+	}
+	if channel == ChannelEmail {
+		if err := query.Find(&bindings).Error; err != nil {
+			return nil, &deliveryError{Code: "TARGET_LOOKUP_FAILED", Message: "读取接收人失败"}
+		}
+	} else {
+		var binding ChannelBinding
+		if err := query.First(&binding).Error; err != nil {
+			return nil, &deliveryError{Code: "CHANNEL_NOT_BOUND", Message: "该通知渠道尚未添加接收人或已停用", Permanent: true}
+		}
+		bindings = []ChannelBinding{binding}
+	}
+	if len(bindings) == 0 {
+		return nil, &deliveryError{Code: "CHANNEL_NOT_BOUND", Message: "该通知渠道尚未添加接收人或已停用", Permanent: true}
+	}
+	return bindings, nil
+}
+
+func sendChannelTarget(ctx context.Context, db *gorm.DB, channel, target string, item Reminder, idempotencyKey string) (sendResult, error) {
+	switch channel {
 	case ChannelSMS:
 		return sendSMSWebhook(ctx, db, target, item, idempotencyKey)
 	case ChannelFeishu:
@@ -728,21 +816,12 @@ func qqConfigured(db *gorm.DB) bool {
 }
 
 // activeEmailRecipients decrypts the active email bindings this send should
-// reach. When a per-reminder selection no longer matches any binding (the
-// mailbox was unbound or disabled meanwhile), the reminder falls back to all
-// active bindings instead of silently failing. The addresses receive the
-// message in one SMTP transaction, matching the delivery model of one
-// delivery job per reminder and channel.
+// reach. A non-empty selection is strict: if its bindings were deleted or
+// disabled, the caller must not silently redirect the reminder elsewhere.
 func activeEmailRecipients(db *gorm.DB, userID uint, targetIDs []uint) ([]string, error) {
 	bindings, err := activeEmailBindings(db, userID, targetIDs)
 	if err != nil {
 		return nil, err
-	}
-	if len(bindings) == 0 && len(targetIDs) > 0 {
-		bindings, err = activeEmailBindings(db, userID, nil)
-		if err != nil {
-			return nil, err
-		}
 	}
 	recipients := make([]string, 0, len(bindings))
 	for _, binding := range bindings {

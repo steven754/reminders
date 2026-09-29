@@ -96,6 +96,40 @@ func TestNormalizeDingTalkWebhook(t *testing.T) {
 	}
 }
 
+func TestHandleTestChannelRequiresTargetAndReminderTitle(t *testing.T) {
+	cleanup := testDB(t)
+	defer cleanup()
+
+	t.Run("target is required", func(t *testing.T) {
+		recorder := httptest.NewRecorder()
+		context, _ := gin.CreateTestContext(recorder)
+		context.Request = httptest.NewRequest(http.MethodPost, "/api/reminder/channels/email/test", strings.NewReader(`{}`))
+		context.Params = gin.Params{{Key: "channel", Value: ChannelEmail}}
+		context.Set("userID", uint(7))
+		handleTestChannel(appDB)(context)
+
+		if recorder.Code != http.StatusBadRequest {
+			t.Fatalf("expected missing target to return 400, got %d: %s", recorder.Code, recorder.Body.String())
+		}
+	})
+
+	t.Run("current reminder title is required", func(t *testing.T) {
+		recorder := httptest.NewRecorder()
+		context, _ := gin.CreateTestContext(recorder)
+		context.Request = httptest.NewRequest(http.MethodPost, "/api/reminder/channels/email/test", strings.NewReader(`{"target":"person@example.com","reminder":{"notes":"备注"}}`))
+		context.Params = gin.Params{{Key: "channel", Value: ChannelEmail}}
+		context.Set("userID", uint(7))
+		handleTestChannel(appDB)(context)
+
+		if recorder.Code != http.StatusBadRequest {
+			t.Fatalf("expected missing title to return 400, got %d: %s", recorder.Code, recorder.Body.String())
+		}
+		if !strings.Contains(recorder.Body.String(), "请输入提醒标题") {
+			t.Fatalf("expected title validation message, got %s", recorder.Body.String())
+		}
+	})
+}
+
 func TestSendDingTalkUsesKeywordCompatibleText(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
@@ -231,9 +265,13 @@ func TestChannelStatusesExposeEmailBindingList(t *testing.T) {
 		if len(status.Bindings) != 2 {
 			t.Fatalf("expected 2 binding items, got %v", status.Bindings)
 		}
-		ids := map[uint]string{first.ID: first.TargetMasked, second.ID: second.TargetMasked}
+		ids := map[uint]struct{ target, masked string }{
+			first.ID:  {target: "one@qq.com", masked: first.TargetMasked},
+			second.ID: {target: "two@163.com", masked: second.TargetMasked},
+		}
 		for _, item := range status.Bindings {
-			if ids[item.ID] != item.TargetMasked {
+			want, ok := ids[item.ID]
+			if !ok || want.target != item.Target || want.masked != item.TargetMasked {
 				t.Fatalf("unexpected binding item: %+v", item)
 			}
 		}
@@ -293,14 +331,14 @@ func TestActiveEmailRecipientsFiltersByReminderTargets(t *testing.T) {
 		t.Fatalf("expected only the selected mailbox, got %v", recipients)
 	}
 
-	// A selection that matches nothing (mailbox unbound meanwhile) falls back
-	// to all active mailboxes instead of dropping the reminder.
+	// A selection that matches nothing (mailbox unbound meanwhile) stays empty;
+	// the delivery layer reports the missing target instead of redirecting.
 	recipients, err = activeEmailRecipients(appDB, userID, []uint{9999})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(recipients) != 2 {
-		t.Fatalf("expected fallback to all mailboxes, got %v", recipients)
+	if len(recipients) != 0 {
+		t.Fatalf("expected no recipients for a missing selection, got %v", recipients)
 	}
 }
 
@@ -313,10 +351,18 @@ func TestReminderTargetsRoundTripAndOwnership(t *testing.T) {
 	createEmailBinding(t, 8, "other@qq.com", "active")
 
 	due := time.Now().Add(2 * time.Hour).Truncate(time.Second)
-	created, err := createReminder(appDB, userID, SaveReminderInput{
+	_, err := createReminder(appDB, userID, SaveReminderInput{
 		Title: "只发工作邮箱", DueAt: &due, RepeatRule: "none",
 		Channels:       []string{ChannelInApp, ChannelEmail},
 		ChannelTargets: map[string][]uint{ChannelEmail: {owned.ID, 8, 9999}},
+	})
+	if err == nil || !strings.Contains(err.Error(), "不存在或已停用") {
+		t.Fatalf("expected invalid target rejection, got %v", err)
+	}
+	created, err := createReminder(appDB, userID, SaveReminderInput{
+		Title: "只发工作邮箱", DueAt: &due, RepeatRule: "none",
+		Channels:       []string{ChannelInApp, ChannelEmail},
+		ChannelTargets: map[string][]uint{ChannelEmail: {owned.ID}},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -334,17 +380,15 @@ func TestReminderTargetsRoundTripAndOwnership(t *testing.T) {
 		t.Fatalf("unexpected stored targets: %v", parseChannelTargets(link.Targets))
 	}
 
-	// Clearing the selection goes back to delivering to every mailbox.
-	updated, err := updateReminder(appDB, userID, created.ID, SaveReminderInput{
+	// Clearing the selection is rejected because every external channel now
+	// needs at least one explicit receiving target.
+	_, err = updateReminder(appDB, userID, created.ID, SaveReminderInput{
 		Title: "只发工作邮箱", DueAt: &due, RepeatRule: "none",
 		Channels:       []string{ChannelInApp, ChannelEmail},
 		ChannelTargets: map[string][]uint{},
 		Version:        created.Version,
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(updated.ChannelTargets) != 0 {
-		t.Fatalf("expected empty channel targets, got %v", updated.ChannelTargets)
+	if err == nil || !strings.Contains(err.Error(), "至少选择一个接收人") {
+		t.Fatalf("expected empty target rejection, got %v", err)
 	}
 }

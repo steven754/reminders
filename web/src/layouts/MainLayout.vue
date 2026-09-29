@@ -255,9 +255,11 @@ function isActive(to: string) {
 function listColor(color: string) {
   return ({ blue: '#3182f6', violet: '#8b5cf6', rose: '#f43f5e', amber: '#f59e0b', emerald: '#10b981' } as Record<string, string>)[color] || '#3182f6'
 }
-function openQuickAdd() {
-  if (!route.path.startsWith('/admin') || ['notifications', 'channels', 'settings', 'profile'].some(x => route.path.includes(x))) router.push('/admin')
+async function openQuickAdd() {
+  const isReminderView = route.path === '/admin' || /^\/admin\/(planned|all|completed|list\/)/.test(route.path)
+  if (!isReminderView) await router.push('/admin')
   mobileOpen.value = false
+  await nextTick()
   setTimeout(() => window.dispatchEvent(new CustomEvent('open-quick-reminder')), 80)
 }
 async function submitList() {
