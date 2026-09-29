@@ -75,6 +75,7 @@
             <label class="field-label">清单<select v-model.number="quick.list_id" class="compact-input"><option v-for="list in lists" :key="list.id" :value="list.id">{{ list.name }}</option></select></label>
             <CronRuleEditor :repeat-rule="quick.repeat_rule || 'none'" :cron-expr="quick.cron_expr || ''" :due-at="quick.due_at || null" class="sm:col-span-2 lg:col-span-4" @update:repeat-rule="quick.repeat_rule = $event" @update:cron-expr="quick.cron_expr = $event" @update:due-at="quick.due_at = $event" />
             <label class="field-label">备注<input v-model="quick.notes" class="compact-input" placeholder="可选" maxlength="5000" /></label>
+            <label class="field-label">通知内容模板<select v-model="quick.notification_template" class="compact-input"><option v-for="template in notificationTemplateOptions" :key="template.value" :value="template.value">{{ template.label }}</option></select></label>
             <label class="field-label">过期提醒频率<RepeatNotifySelect :model-value="quick.repeat_notify_minutes ?? 0" @update:model-value="quick.repeat_notify_minutes = $event" /></label>
             <div class="sm:col-span-2 lg:col-span-4">
               <p class="field-label mb-2">通知方式</p>
@@ -182,6 +183,7 @@
             <div class="min-h-0 flex-1 space-y-4 overflow-y-auto p-4 sm:space-y-6 sm:p-6">
               <label class="editor-field"><span>标题</span><input v-model="editing.title" autofocus maxlength="200" placeholder="要提醒什么？" /></label>
               <label class="editor-field"><span>备注</span><textarea v-model="editing.notes" rows="4" maxlength="5000" placeholder="补充一些细节…"></textarea></label>
+              <label class="editor-field"><span>通知内容模板</span><select v-model="editing.notification_template"><option v-for="template in notificationTemplateOptions" :key="template.value" :value="template.value">{{ template.label }}</option></select><small class="text-muted-foreground">可选；不选择时不显示计划时间，只发送默认提醒内容。</small></label>
               <div class="grid grid-cols-2 gap-3">
                 <div class="editor-field relative">
                   <span>开始时间</span>
@@ -283,12 +285,20 @@ const clockNow = ref(Date.now())
 const toast = reactive<{ message: string; type: 'success' | 'error' }>({ message: '', type: 'success' })
 
 const blankInput = (): SaveReminderInput => ({
-  title: '', notes: '', list_id: 0, priority: 0, due_at: null, end_at: null,
+  title: '', notes: '', notification_template: '', list_id: 0, priority: 0, due_at: null, end_at: null,
   all_day: false, repeat_rule: 'none', cron_expr: '', calendar: 'solar', repeat_notify_minutes: 0, channels: ['inapp'], channel_targets: {},
 })
 const quick = reactive<SaveReminderInput>(blankInput())
 const editing = reactive<SaveReminderInput & { id?: number }>(blankInput())
 let quickChannelsTouched = false
+
+const notificationTemplateOptions = [
+  { value: '', label: '默认提醒（不显示计划时间）' },
+  { value: 'title', label: '提醒事项：标题' },
+  { value: 'warm', label: '温馨提醒：请记得完成' },
+  { value: 'urgent', label: '请及时处理' },
+  { value: 'forget', label: '别忘了' },
+]
 
 const view = computed(() => String(route.meta.reminderView || 'today'))
 const selectedListID = computed(() => route.name === 'ReminderList' ? Number(route.params.id) : undefined)
@@ -501,7 +511,7 @@ watch(() => [editing.due_at, editing.end_at], ([dueAt, endAt]) => {
 
 function editItem(item: ReminderItem) {
   Object.assign(editing, {
-    id: item.id, title: item.title, notes: item.notes, list_id: item.list_id,
+    id: item.id, title: item.title, notes: item.notes, notification_template: item.notification_template || '', list_id: item.list_id,
     priority: item.priority, due_at: item.due_at, end_at: item.end_at, all_day: item.all_day,
     repeat_rule: item.repeat_rule, cron_expr: item.cron_expr || '', calendar: 'solar',
     repeat_notify_minutes: item.repeat_notify_minutes || 0,

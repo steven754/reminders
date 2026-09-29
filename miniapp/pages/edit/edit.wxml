@@ -11,6 +11,10 @@
     <view class="label">备注</view>
     <textarea class="textarea" value="{{notes}}" maxlength="5000" placeholder="可选" bindinput="onNotesInput"></textarea>
 
+    <view class="label">通知内容模板（可选）</view>
+    <picker class="picker full" mode="selector" range="{{notificationTemplateOptions}}" range-key="label" value="{{notificationTemplateIndex}}" bindchange="onNotificationTemplateChange"><view>{{notificationTemplateOptions[notificationTemplateIndex].label}}</view></picker>
+    <view class="tip">默认不显示计划时间；选择模板后会将对应内容写入通知正文。</view>
+
     <view class="label">开始时间</view>
     <view class="row">
       <picker class="picker" mode="date" value="{{startDate}}" bindchange="onStartDateChange"><view>{{startDate || '选择日期'}}</view></picker>

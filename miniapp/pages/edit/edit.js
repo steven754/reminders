@@ -28,6 +28,13 @@ const calendarModeOptions = [
   { value: 'date', label: '按几号' },
   { value: 'weekday', label: '按星期几' },
 ]
+const notificationTemplateOptions = [
+  { value: '', label: '默认提醒（不显示计划时间）' },
+  { value: 'title', label: '提醒事项：标题' },
+  { value: 'warm', label: '温馨提醒：请记得完成' },
+  { value: 'urgent', label: '请及时处理' },
+  { value: 'forget', label: '别忘了' },
+]
 
 function pad(value) { return String(value).padStart(2, '0') }
 function intervalUnitOptions(data) {
@@ -133,6 +140,7 @@ function buildReminderPayload(data) {
   return {
     title: data.title.trim(),
     notes: data.notes.trim(),
+    notification_template: data.notificationTemplate,
     list_id: data.listId,
     priority: 0,
     due_at: localISO(data.startDate, data.startTime),
@@ -151,6 +159,9 @@ Page({
     id: '',
     title: '',
     notes: '',
+    notificationTemplateOptions,
+    notificationTemplate: '',
+    notificationTemplateIndex: 0,
     startDate: '',
     startTime: '',
     endDate: '',
@@ -232,6 +243,8 @@ Page({
     this.setData({
       title: item.title || '',
       notes: item.notes || '',
+      notificationTemplate: item.notification_template || '',
+      notificationTemplateIndex: Math.max(0, notificationTemplateOptions.findIndex(option => option.value === (item.notification_template || ''))),
       startDate: start.date,
       startTime: start.time,
       endDate: end.date,
@@ -256,6 +269,11 @@ Page({
 
   onTitleInput(event) { this.setData({ title: event.detail.value }) },
   onNotesInput(event) { this.setData({ notes: event.detail.value }) },
+  onNotificationTemplateChange(event) {
+    const index = Number(event.detail.value)
+    const option = notificationTemplateOptions[index] || notificationTemplateOptions[0]
+    this.setData({ notificationTemplateIndex: index, notificationTemplate: option.value })
+  },
   onStartDateChange(event) { this.setData({ startDate: event.detail.value }) },
   onStartTimeChange(event) {
     const startTime = event.detail.value

@@ -45,16 +45,19 @@ type List struct {
 }
 
 type Reminder struct {
-	ID         uint       `gorm:"primarykey" json:"id"`
-	UserID     uint       `gorm:"not null;index:idx_reminders_user_due;index:idx_reminders_user_completed" json:"-"`
-	ListID     uint       `gorm:"not null;index" json:"list_id"`
-	Title      string     `gorm:"size:200;not null" json:"title"`
-	Notes      string     `gorm:"type:text" json:"notes"`
-	Priority   int        `gorm:"not null;default:0" json:"priority"`
-	DueAt      *time.Time `gorm:"index:idx_reminders_user_due" json:"due_at"`
-	EndAt      *time.Time `gorm:"index" json:"end_at"`
-	AllDay     bool       `gorm:"not null;default:false" json:"all_day"`
-	RepeatRule string     `gorm:"size:16;not null;default:none" json:"repeat_rule"`
+	ID     uint   `gorm:"primarykey" json:"id"`
+	UserID uint   `gorm:"not null;index:idx_reminders_user_due;index:idx_reminders_user_completed" json:"-"`
+	ListID uint   `gorm:"not null;index" json:"list_id"`
+	Title  string `gorm:"size:200;not null" json:"title"`
+	Notes  string `gorm:"type:text" json:"notes"`
+	// NotificationTemplate selects an optional built-in notification body
+	// template. An empty value keeps the default concise reminder text.
+	NotificationTemplate string     `gorm:"size:32;not null;default:''" json:"notification_template,omitempty"`
+	Priority             int        `gorm:"not null;default:0" json:"priority"`
+	DueAt                *time.Time `gorm:"index:idx_reminders_user_due" json:"due_at"`
+	EndAt                *time.Time `gorm:"index" json:"end_at"`
+	AllDay               bool       `gorm:"not null;default:false" json:"all_day"`
+	RepeatRule           string     `gorm:"size:16;not null;default:none" json:"repeat_rule"`
 	// CronExpr is used by custom cron reminders. Built-in daily/weekly rules
 	// are translated to cron at scheduling time so the API stays friendly.
 	CronExpr string `gorm:"size:120" json:"cron_expr,omitempty"`

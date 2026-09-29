@@ -36,6 +36,28 @@ func TestSMTPErrorMessageKeepsNonAuthenticationFailure(t *testing.T) {
 	}
 }
 
+func TestNotificationContentOmitsScheduledTime(t *testing.T) {
+	dueAt := time.Date(2026, time.September, 30, 8, 30, 0, 0, time.Local)
+	got := notificationContent(Reminder{Title: "服用维生素", DueAt: &dueAt, Notes: "AD、维A、铁、钙"})
+	if strings.Contains(got, "计划时间") {
+		t.Fatalf("notification content still includes scheduled time: %q", got)
+	}
+	if got != "你有一条新的提醒\n\nAD、维A、铁、钙" {
+		t.Fatalf("notification content = %q", got)
+	}
+}
+
+func TestNotificationContentUsesSelectedTemplate(t *testing.T) {
+	got := notificationContent(Reminder{
+		Title:                "服用维生素",
+		NotificationTemplate: "warm",
+		Notes:                "AD、维A、铁、钙",
+	})
+	if got != "温馨提醒：请记得完成「服用维生素」\n\nAD、维A、铁、钙" {
+		t.Fatalf("notification content = %q", got)
+	}
+}
+
 func TestResolveFeishuOpenIDByEmail(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")

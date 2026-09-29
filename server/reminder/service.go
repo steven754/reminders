@@ -23,15 +23,16 @@ var repeatRules = map[string]bool{
 }
 
 type SaveReminderInput struct {
-	Title      string     `json:"title"`
-	Notes      string     `json:"notes"`
-	ListID     uint       `json:"list_id"`
-	Priority   int        `json:"priority"`
-	DueAt      *time.Time `json:"due_at"`
-	EndAt      *time.Time `json:"end_at"`
-	AllDay     bool       `json:"all_day"`
-	RepeatRule string     `json:"repeat_rule"`
-	CronExpr   string     `json:"cron_expr"`
+	Title                string     `json:"title"`
+	Notes                string     `json:"notes"`
+	NotificationTemplate string     `json:"notification_template"`
+	ListID               uint       `json:"list_id"`
+	Priority             int        `json:"priority"`
+	DueAt                *time.Time `json:"due_at"`
+	EndAt                *time.Time `json:"end_at"`
+	AllDay               bool       `json:"all_day"`
+	RepeatRule           string     `json:"repeat_rule"`
+	CronExpr             string     `json:"cron_expr"`
 	// Calendar selects "solar" (default) or "lunar" recurrence for the
 	// monthly/yearly rules. The deprecated repeat_rule value "yearly_lunar"
 	// is normalized to RepeatRule=yearly + Calendar=lunar on save.
@@ -81,6 +82,9 @@ func validateReminderInput(in *SaveReminderInput) error {
 	}
 	if len([]rune(in.Notes)) > 5000 {
 		return errors.New("备注不能超过 5000 个字符")
+	}
+	if _, ok := supportedNotificationTemplates[in.NotificationTemplate]; !ok {
+		return errors.New("通知内容模板无效")
 	}
 	if in.Priority < 0 || in.Priority > 3 {
 		return errors.New("优先级无效")
@@ -210,7 +214,8 @@ func createReminder(db *gorm.DB, userID uint, in SaveReminderInput) (ReminderDTO
 		}
 		created = Reminder{
 			UserID: userID, ListID: in.ListID, Title: in.Title, Notes: in.Notes,
-			Priority: in.Priority, DueAt: in.DueAt, EndAt: in.EndAt, AllDay: in.AllDay,
+			NotificationTemplate: in.NotificationTemplate,
+			Priority:             in.Priority, DueAt: in.DueAt, EndAt: in.EndAt, AllDay: in.AllDay,
 			RepeatRule: in.RepeatRule, CronExpr: in.CronExpr, Calendar: in.Calendar, LunarAnchor: in.LunarAnchor,
 			RepeatNotifyMinutes: in.RepeatNotifyMinutes, Version: 1,
 		}
@@ -250,6 +255,7 @@ func updateReminder(db *gorm.DB, userID, reminderID uint, in SaveReminderInput) 
 		}
 		existing.Title = in.Title
 		existing.Notes = in.Notes
+		existing.NotificationTemplate = in.NotificationTemplate
 		existing.ListID = in.ListID
 		existing.Priority = in.Priority
 		existing.DueAt = in.DueAt

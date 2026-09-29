@@ -360,7 +360,8 @@ func handleTestChannel(db *gorm.DB) gin.HandlerFunc {
 			}
 			item = Reminder{
 				ID: 0, UserID: userID, Title: reminderInput.Title, Notes: reminderInput.Notes,
-				DueAt: reminderInput.DueAt, EndAt: reminderInput.EndAt, AllDay: reminderInput.AllDay,
+				NotificationTemplate: reminderInput.NotificationTemplate,
+				DueAt:                reminderInput.DueAt, EndAt: reminderInput.EndAt, AllDay: reminderInput.AllDay,
 				RepeatRule: reminderInput.RepeatRule, CronExpr: reminderInput.CronExpr,
 				Calendar: reminderInput.Calendar, LunarAnchor: reminderInput.LunarAnchor,
 				RepeatNotifyMinutes: reminderInput.RepeatNotifyMinutes,
@@ -686,7 +687,7 @@ func stringValue(value []byte, err error) (string, error) {
 // became required: email uses all active targets, other channels use the first.
 func sendChannel(ctx context.Context, db *gorm.DB, channel string, userID uint, item Reminder, idempotencyKey string, targetIDs []uint) (sendResult, error) {
 	if channel == ChannelInApp {
-		n := Notification{UserID: userID, Type: "reminder_due", Title: item.Title, Body: notificationBody(item)}
+		n := Notification{UserID: userID, Type: "reminder_due", Title: item.Title, Body: notificationContent(item)}
 		if item.ID > 0 {
 			n.ReminderID = &item.ID
 		}
@@ -792,10 +793,14 @@ func sendChannelTarget(ctx context.Context, db *gorm.DB, channel, target string,
 }
 
 func notificationBody(item Reminder) string {
-	if item.DueAt != nil {
-		return "计划时间：" + item.DueAt.In(shanghai()).Format("01月02日 15:04")
+	template, ok := notificationTemplates[item.NotificationTemplate]
+	if !ok || template == "" {
+		return "你有一条新的提醒"
 	}
-	return "你有一条新的提醒"
+	return strings.TrimSpace(strings.NewReplacer(
+		"{{title}}", item.Title,
+		"{{notes}}", item.Notes,
+	).Replace(template))
 }
 
 func emailConfigured(db *gorm.DB) bool {
