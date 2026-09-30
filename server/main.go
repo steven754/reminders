@@ -14,6 +14,7 @@ import (
 
 	// Blank-import apps so their init() registers routes with the app registry.
 	// Add your own apps here.
+	_ "smallgo/server/medkit"
 	_ "smallgo/server/reminder"
 )
 

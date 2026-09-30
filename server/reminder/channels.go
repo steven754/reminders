@@ -50,6 +50,13 @@ func handleChannelStatuses(db *gorm.DB) gin.HandlerFunc {
 	}
 }
 
+// ChannelStatusesForUser is used by scoped features such as Medkit. Callers
+// must perform their own ownership/access check before asking for another
+// user's statuses.
+func ChannelStatusesForUser(db *gorm.DB, userID uint) []ChannelStatus {
+	return channelStatuses(db, userID)
+}
+
 func handleProviderStatuses(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		response.Success(c, gin.H{

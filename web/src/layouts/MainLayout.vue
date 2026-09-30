@@ -88,6 +88,18 @@
             <span class="flex-1 truncate">{{ list.name }}</span>
             <span v-if="list.open_count" class="nav-count">{{ list.open_count }}</span>
           </RouterLink>
+
+          <RouterLink
+            to="/admin/medkit"
+            class="nav-row mt-4"
+            :class="{ 'nav-row-active': route.path === '/admin/medkit' }"
+            @click="mobileOpen = false"
+          >
+            <span class="nav-symbol bg-rose-500/12 text-rose-500">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M10.5 3.5h3a2 2 0 0 1 2 2v2.2l3.4 5.9a4.5 4.5 0 0 1-3.9 6.7H9a4.5 4.5 0 0 1-3.9-6.7l3.4-5.9V5.5a2 2 0 0 1 2-2Z" stroke-width="1.7" stroke-linejoin="round"/><path d="M9 9h6M8 14h8" stroke-width="1.7" stroke-linecap="round"/></svg>
+            </span>
+            <span class="flex-1">AI 药箱</span>
+          </RouterLink>
         </nav>
 
         <div class="border-t border-border/70 p-3">
