@@ -68,10 +68,12 @@ func processJob(db *gorm.DB, candidate DeliveryJob) {
 		finishCancelled(db, job.ID, "REMINDER_CHANGED")
 		return
 	}
-	// 过期重复提醒的链条任务按“到期时间 + k×间隔”落在 DueAt 之后，属于预期；
-	// 其余 ScheduledFor 与 DueAt 不一致的任务都是过期 occurrence 的陈旧任务。
-	if !sameInstant(*item.DueAt, job.ScheduledFor) &&
-		!(item.RepeatNotifyMinutes > 0 && job.ScheduledFor.After(*item.DueAt)) {
+	// 过期重复提醒的链条任务和循环规则的后续 occurrence 都会落在
+	// DueAt 之后，属于预期；其余 ScheduledFor 与 DueAt 不一致的任务都是
+	// 过期 occurrence 的陈旧任务。
+	shifted := job.ScheduledFor.After(*item.DueAt) &&
+		(item.RepeatNotifyMinutes > 0 || recurringReminder(item.RepeatRule, item.CronExpr))
+	if !sameInstant(*item.DueAt, job.ScheduledFor) && !shifted {
 		finishCancelled(db, job.ID, "REMINDER_CHANGED")
 		return
 	}
@@ -107,8 +109,9 @@ func processJob(db *gorm.DB, candidate DeliveryJob) {
 				return e
 			}
 			// The send succeeded and the user has not completed the reminder
-			// yet, so queue the next notification for repeat-notify reminders.
-			return scheduleRepeatNotify(tx, item, job)
+			// yet, so continue either the repeat-notify chain or the recurring
+			// occurrence schedule.
+			return queueDeliveryContinuation(tx, item, job)
 		})
 		if job.Channel != ChannelInApp {
 			_ = db.Model(&ChannelBinding{}).Where("user_id = ? AND channel = ?", job.UserID, job.Channel).Updates(map[string]interface{}{"last_error_code": "", "last_error_at": nil}).Error
@@ -149,7 +152,10 @@ func processJob(db *gorm.DB, candidate DeliveryJob) {
 				}
 				failureNotification = &n
 			}
-			return nil
+			// A terminal failure ends this occurrence, not the reminder's
+			// entire cadence. The next job is per-channel so another channel
+			// cannot accidentally hide this channel's failure.
+			return queueDeliveryContinuation(tx, item, job)
 		})
 		if txErr == nil && failureNotification != nil {
 			publishNotification(*failureNotification)
@@ -188,11 +194,11 @@ func scheduleRepeatNotify(tx *gorm.DB, item Reminder, job DeliveryJob) error {
 	if item.RepeatNotifyMinutes <= 0 || item.DueAt == nil {
 		return nil
 	}
-	next := job.ScheduledFor.Add(time.Duration(item.RepeatNotifyMinutes) * time.Minute)
 	// 逾期一段时间后才开启/重建链条时，被跳过的间隔不再逐个补发（避免一次性
 	// 轰炸一串过期通知），直接从现在起排下一个完整间隔。
-	if now := time.Now().UTC(); !next.After(now) {
-		next = now.Add(time.Duration(item.RepeatNotifyMinutes) * time.Minute)
+	next := nextRepeatNotifyAt(job.ScheduledFor, time.Now(), item.RepeatNotifyMinutes)
+	if item.EndAt != nil && next.After(item.EndAt.UTC()) {
+		return nil
 	}
 	raw := fmt.Sprintf("%d|%s|%s|chain", item.ID, job.Channel, next.UTC().Format(time.RFC3339Nano))
 	sum := sha256.Sum256([]byte(raw))
@@ -210,6 +216,32 @@ func scheduleRepeatNotify(tx *gorm.DB, item Reminder, job DeliveryJob) error {
 			"last_error_message": "", "external_message_id": "",
 		}),
 	}).Create(&nextJob).Error
+}
+
+func nextRepeatNotifyAt(from, now time.Time, minutes int) time.Time {
+	next := from.Add(time.Duration(minutes) * time.Minute)
+	if !next.After(now) {
+		next = now.Add(time.Duration(minutes) * time.Minute)
+	}
+	return next
+}
+
+func queueDeliveryContinuation(tx *gorm.DB, item Reminder, job DeliveryJob) error {
+	if item.RepeatNotifyMinutes > 0 {
+		return scheduleRepeatNotify(tx, item, job)
+	}
+	return queueNextOccurrence(tx, item, job)
+}
+
+func queueNextOccurrence(tx *gorm.DB, item Reminder, job DeliveryJob) error {
+	if item.CompletedAt != nil || item.DueAt == nil || !recurringReminder(item.RepeatRule, item.CronExpr) {
+		return nil
+	}
+	next, ok := nextOccurrenceAfter(*item.DueAt, job.ScheduledFor, item)
+	if !ok || (item.EndAt != nil && next.After(item.EndAt.UTC())) {
+		return nil
+	}
+	return upsertOccurrenceJob(tx, item, job.Channel, next.UTC(), next.UTC())
 }
 
 func sameInstant(a, b time.Time) bool {

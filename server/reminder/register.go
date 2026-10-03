@@ -96,4 +96,12 @@ func init() {
 			}
 		},
 	})
+	scheduler.Register(scheduler.Job{
+		Name: "reminder-delivery-cleanup", Daily: "03:30", RunAtStart: true,
+		Run: func() {
+			if appDB != nil {
+				cleanupDeliveryHistory(appDB)
+			}
+		},
+	})
 }

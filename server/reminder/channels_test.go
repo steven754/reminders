@@ -396,6 +396,21 @@ func TestReminderTargetsRoundTripAndOwnership(t *testing.T) {
 	if stored := parseChannelTargets(link.Targets); len(stored) != 1 || stored[0] != owned.ID {
 		t.Fatalf("unexpected stored targets: %v", parseChannelTargets(link.Targets))
 	}
+	channelID := link.ID
+	updated, err := updateReminder(appDB, userID, created.ID, SaveReminderInput{
+		Title: "只发工作邮箱", Notes: "更新备注", ListID: created.ListID, DueAt: &due,
+		RepeatRule: "none", Channels: []string{ChannelInApp, ChannelEmail},
+		ChannelTargets: map[string][]uint{ChannelEmail: {owned.ID}}, Version: created.Version,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := appDB.Where("reminder_id = ? AND channel = ?", created.ID, ChannelEmail).First(&link).Error; err != nil {
+		t.Fatal(err)
+	}
+	if link.ID != channelID {
+		t.Fatalf("expected reminder channel ID to remain stable, changed from %d to %d", channelID, link.ID)
+	}
 
 	// Clearing the selection is rejected because every external channel now
 	// needs at least one explicit receiving target.
@@ -403,7 +418,7 @@ func TestReminderTargetsRoundTripAndOwnership(t *testing.T) {
 		Title: "只发工作邮箱", DueAt: &due, RepeatRule: "none",
 		Channels:       []string{ChannelInApp, ChannelEmail},
 		ChannelTargets: map[string][]uint{},
-		Version:        created.Version,
+		Version:        updated.Version,
 	})
 	if err == nil || !strings.Contains(err.Error(), "至少选择一个接收人") {
 		t.Fatalf("expected empty target rejection, got %v", err)

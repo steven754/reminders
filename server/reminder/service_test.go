@@ -217,6 +217,19 @@ func TestIntervalCronStaysInsideTimeWindow(t *testing.T) {
 	}
 }
 
+func TestIntervalCronUsesWindowStartBeforeFirstOccurrence(t *testing.T) {
+	loc := shanghai()
+	before := time.Date(2026, time.January, 1, 11, 45, 0, 0, loc)
+	expr := "@interval/v1|step=1800|start=43200|end=46800|base=0 0 12 * * *"
+	next, err := nextCronOccurrence(before, expr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := time.Date(2026, time.January, 1, 12, 0, 0, 0, loc); !next.Equal(want) {
+		t.Fatalf("expected window start %v, got %v", want, next)
+	}
+}
+
 func TestIntervalCronRejectsWindowLength(t *testing.T) {
 	_, err := parseCronSchedule("@interval/v1|step=3600|start=43200|end=46800|base=0 0 12 * * *")
 	if err == nil {

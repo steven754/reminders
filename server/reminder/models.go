@@ -155,7 +155,7 @@ type DeliveryJob struct {
 	LastErrorMessage  string     `gorm:"size:300" json:"last_error_message,omitempty"`
 	ExternalMessageID string     `gorm:"size:200" json:"external_message_id,omitempty"`
 	CreatedAt         time.Time  `json:"created_at"`
-	UpdatedAt         time.Time  `json:"updated_at"`
+	UpdatedAt         time.Time  `gorm:"index:idx_delivery_job_updated" json:"updated_at"`
 }
 
 type DeliveryAttempt struct {
@@ -163,7 +163,7 @@ type DeliveryAttempt struct {
 	JobID           uint      `gorm:"not null;index" json:"job_id"`
 	AttemptNo       int       `gorm:"not null" json:"attempt_no"`
 	StartedAt       time.Time `json:"started_at"`
-	FinishedAt      time.Time `json:"finished_at"`
+	FinishedAt      time.Time `gorm:"index:idx_delivery_attempt_finished" json:"finished_at"`
 	Result          string    `gorm:"size:16;not null" json:"result"`
 	ProviderCode    string    `gorm:"size:100" json:"provider_code,omitempty"`
 	LatencyMS       int64     `json:"latency_ms"`

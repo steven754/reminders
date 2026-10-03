@@ -290,9 +290,15 @@ func assertListOwner(tx *gorm.DB, userID, listID uint) error {
 }
 
 func replaceChannels(tx *gorm.DB, reminder Reminder, in SaveReminderInput) error {
-	if err := tx.Where("reminder_id = ? AND user_id = ?", reminder.ID, reminder.UserID).Delete(&ReminderChannel{}).Error; err != nil {
+	var existing []ReminderChannel
+	if err := tx.Where("reminder_id = ? AND user_id = ?", reminder.ID, reminder.UserID).Find(&existing).Error; err != nil {
 		return err
 	}
+	existingByChannel := make(map[string]ReminderChannel, len(existing))
+	for _, row := range existing {
+		existingByChannel[row.Channel] = row
+	}
+
 	rows := make([]ReminderChannel, 0, len(in.Channels))
 	for _, ch := range in.Channels {
 		row := ReminderChannel{ReminderID: reminder.ID, UserID: reminder.UserID, Channel: ch, Enabled: true}
@@ -316,10 +322,38 @@ func replaceChannels(tx *gorm.DB, reminder Reminder, in SaveReminderInput) error
 		}
 		rows = append(rows, row)
 	}
-	if len(rows) == 0 {
-		return nil
+
+	desired := make(map[string]struct{}, len(rows))
+	for _, row := range rows {
+		desired[row.Channel] = struct{}{}
+		if old, ok := existingByChannel[row.Channel]; ok {
+			if err := tx.Model(&old).Updates(map[string]interface{}{
+				"enabled": row.Enabled,
+				"targets": row.Targets,
+			}).Error; err != nil {
+				return err
+			}
+			continue
+		}
+		if err := tx.Create(&row).Error; err != nil {
+			return err
+		}
 	}
-	return tx.Create(&rows).Error
+	for _, row := range existing {
+		if _, ok := desired[row.Channel]; ok {
+			continue
+		}
+		// Keep the row and its ID stable. This makes channel history easier to
+		// follow and leaves room for future per-channel fields without a full
+		// DELETE+INSERT replacement on every reminder update.
+		if err := tx.Model(&row).Updates(map[string]interface{}{
+			"enabled": false,
+			"targets": "",
+		}).Error; err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // ownedActiveBindingIDs returns only active targets belonging to the current
@@ -346,35 +380,84 @@ func rebuildJobs(tx *gorm.DB, reminder Reminder, channels []string) error {
 	}
 	// Keep all delivery timestamps in UTC. This matters for SQLite because the
 	// scheduler's timestamp predicate compares the stored values as text.
-	scheduledFor := reminder.DueAt.UTC()
-	if reminder.EndAt != nil && scheduledFor.After(reminder.EndAt.UTC()) {
-		return nil
-	}
-	runAt := scheduledFor
-	if reminder.SnoozedUntil != nil {
-		runAt = reminder.SnoozedUntil.UTC()
-	}
 	for _, ch := range channels {
-		raw := fmt.Sprintf("%d|%s|%s|%d", reminder.ID, reminder.DueAt.UTC().Format(time.RFC3339Nano), ch, reminder.Version)
-		sum := sha256.Sum256([]byte(raw))
-		job := DeliveryJob{
-			UserID: reminder.UserID, ReminderID: reminder.ID, Channel: ch,
-			ScheduledFor: scheduledFor, RunAt: runAt, Status: "pending",
-			IdempotencyKey: hex.EncodeToString(sum[:]),
+		scheduledFor := reminder.DueAt.UTC()
+		// Rebuilding an already delivered occurrence must not reset its job to
+		// pending. Resolve this per channel so one successful channel cannot
+		// skip another channel that failed in the same occurrence.
+		if reminder.SnoozedUntil == nil && occurrenceDelivered(tx, reminder.ID, reminder.UserID, ch, scheduledFor) {
+			if reminder.RepeatNotifyMinutes > 0 {
+				scheduledFor = nextRepeatNotifyAt(scheduledFor, time.Now(), reminder.RepeatNotifyMinutes)
+			} else if next, ok := nextOccurrenceAfter(*reminder.DueAt, time.Now(), reminder); ok {
+				scheduledFor = next.UTC()
+			}
 		}
-		if err := tx.Clauses(clause.OnConflict{
-			Columns: []clause.Column{{Name: "reminder_id"}, {Name: "channel"}, {Name: "scheduled_for"}},
-			DoUpdates: clause.Assignments(map[string]interface{}{
-				"run_at": runAt, "status": "pending", "attempt_count": 0,
-				"next_attempt_at": nil, "locked_at": nil, "worker_id": "",
-				"idempotency_key": job.IdempotencyKey, "last_error_code": "",
-				"last_error_message": "", "external_message_id": "",
-			}),
-		}).Create(&job).Error; err != nil {
+		if reminder.EndAt != nil && scheduledFor.After(reminder.EndAt.UTC()) {
+			continue
+		}
+		runAt := scheduledFor
+		if reminder.SnoozedUntil != nil {
+			runAt = reminder.SnoozedUntil.UTC()
+		}
+		if err := upsertOccurrenceJob(tx, reminder, ch, scheduledFor, runAt); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+func upsertOccurrenceJob(tx *gorm.DB, reminder Reminder, channel string, scheduledFor, runAt time.Time) error {
+	raw := fmt.Sprintf("%d|%s|%s|%d", reminder.ID, scheduledFor.Format(time.RFC3339Nano), channel, reminder.Version)
+	sum := sha256.Sum256([]byte(raw))
+	job := DeliveryJob{
+		UserID: reminder.UserID, ReminderID: reminder.ID, Channel: channel,
+		ScheduledFor: scheduledFor, RunAt: runAt, Status: "pending",
+		IdempotencyKey: hex.EncodeToString(sum[:]),
+	}
+	return tx.Clauses(clause.OnConflict{
+		Columns: []clause.Column{{Name: "reminder_id"}, {Name: "channel"}, {Name: "scheduled_for"}},
+		DoUpdates: clause.Assignments(map[string]interface{}{
+			"run_at": runAt, "status": "pending", "attempt_count": 0,
+			"next_attempt_at": nil, "locked_at": nil, "worker_id": "",
+			"idempotency_key": job.IdempotencyKey, "last_error_code": "",
+			"last_error_message": "", "external_message_id": "",
+		}),
+	}).Create(&job).Error
+}
+
+func recurringReminder(rule, cronExpr string) bool {
+	return cronExpr != "" || (rule != "" && rule != "none")
+}
+
+func occurrenceDelivered(tx *gorm.DB, reminderID, userID uint, channel string, scheduledFor time.Time) bool {
+	var count int64
+	if err := tx.Model(&DeliveryJob{}).
+		Where("reminder_id = ? AND user_id = ? AND channel = ? AND scheduled_for = ? AND status = ?",
+			reminderID, userID, channel, scheduledFor, "succeeded").Count(&count).Error; err != nil {
+		return false
+	}
+	return count > 0
+}
+
+func nextOccurrenceAfter(from, after time.Time, reminder Reminder) (time.Time, bool) {
+	if !recurringReminder(reminder.RepeatRule, reminder.CronExpr) {
+		return from, false
+	}
+	if from.After(after) {
+		return from, true
+	}
+	cursor := from
+	for i := 0; i < 4000; i++ {
+		next, err := nextOccurrenceWithCalendar(cursor, reminder.RepeatRule, reminder.CronExpr, reminder.Calendar, reminder.LunarAnchor)
+		if err != nil || !next.After(cursor) {
+			return from, false
+		}
+		cursor = next
+		if cursor.After(after) {
+			return cursor, true
+		}
+	}
+	return from, false
 }
 
 func getReminder(db *gorm.DB, userID, reminderID uint) (ReminderDTO, error) {
@@ -697,7 +780,11 @@ type intervalSchedule struct {
 
 func (s intervalSchedule) Next(t time.Time) time.Time {
 	next := t.Add(s.step)
-	if sameLocalDate(next, t) && secondsSinceMidnight(next) <= s.end {
+	// Before the window starts, the base cron owns the first occurrence. Only
+	// step inside the same day's active window; otherwise jump to the next base
+	// occurrence. Without the start check, e.g. 08:00 + 59m incorrectly yields
+	// 08:59 for a window that starts at 08:30.
+	if secondsSinceMidnight(t) >= s.start && sameLocalDate(next, t) && secondsSinceMidnight(next) <= s.end {
 		return next
 	}
 	return s.base.Next(t)
